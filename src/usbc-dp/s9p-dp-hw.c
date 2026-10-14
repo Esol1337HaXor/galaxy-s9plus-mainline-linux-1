@@ -1489,8 +1489,33 @@ int s9p_dp_decon_on(struct s9p_dp *dp, const struct drm_display_mode *m,
 	/* decon_reg_start */
 	rmw(dp->d2, DECON_SHADOW_REG_UPDATE_REQ, 0, 0x3f);
 	ret = lh_power(dp, true);
-	rmw(dp->d2, DECON_GLOBAL_CONTROL, 0, DECON_EN | DECON_EN_F);
-	rmw(dp->d2, DECON_SHADOW_REG_UPDATE_REQ, 0, SHADOW_GLOBAL);
+	{
+		/*
+		 * The DP controller's timing generator paces DECON2 by pulling
+		 * pixels, and it runs on whether DECON2 does or not. If DECON2
+		 * starts in the middle of a DP frame, its first pixel lands
+		 * there: the picture comes out shifted and wrapped, by a
+		 * different amount every start, with background lines at the
+		 * bottom. Starting it right at the DP's vertical sync puts its
+		 * first line on the DP's first active line (the vsync and back
+		 * porch, about 0.6 ms at 1080p, cover DECON2's start).
+		 */
+		unsigned long flags;
+		bool synced = false;
+		u32 st;
+
+		local_irq_save(flags);
+		if (rl(dp->link, SST1_VIDEO_ENABLE) & BIT(0)) {
+			wl(dp->link, SST1_INTERRUPT_STATUS_SET0, VSYNC_DET);
+			synced = !readl_poll_timeout_atomic(dp->link + SST1_INTERRUPT_STATUS_SET0,
+							    st, st & VSYNC_DET, 1, 50000);
+		}
+		rmw(dp->d2, DECON_GLOBAL_CONTROL, 0, DECON_EN | DECON_EN_F);
+		rmw(dp->d2, DECON_SHADOW_REG_UPDATE_REQ, 0, SHADOW_GLOBAL);
+		local_irq_restore(flags);
+		if (!synced)
+			dp_log(dp, "DECON2 started without the DP vertical sync");
+	}
 	if (readl_poll_timeout(dp->d2 + DECON_GLOBAL_CONTROL, v, v & DECON_RUN_STATUS,
 			       10, 20000)) {
 		dp_log(dp, "DECON2 did not reach RUN (%08x)", v);

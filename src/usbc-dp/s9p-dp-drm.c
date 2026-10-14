@@ -408,18 +408,25 @@ static void pipe_enable(struct drm_simple_display_pipe *pipe,
 	int ret = -ENODEV;
 
 	mutex_lock(&dp->lock);
-	if (dp->connected && dp->blanked && dp->trained && drm_mode_equal(m, &dp->cur_mode)) {
-		/* back from blanking: same link and timing, only the DECON source changes */
-		s9p_dp_decon_off(dp);
-		dp->blanked = false;
-		ret = s9p_dp_decon_on(dp, m, drm_fb_dma_get_gem_addr(fb, ps, 0), fb->pitches[0]);
-		dp_log(dp, "unblank: %d", ret);
-		if (!ret)
-			goto out;
-	}
+	/*
+	 * Back from blanking: the same sequence as the first start, controller
+	 * and PHY reset included. Restarting DECON2, the video stream or even
+	 * the training under a running controller left the picture shifted
+	 * (and wrapped) by a random amount; only a fresh controller starts it
+	 * aligned with DECON2.
+	 */
 	if (dp->connected) {
+		bool was_blanked = dp->blanked;
+
 		stop_output(dp);
-		ret = s9p_dp_train(dp, m);
+		ret = 0;
+		if (was_blanked) {
+			dp->phy_ready = false;
+			dp->trained = false;
+			ret = s9p_dp_hw_up(dp);
+		}
+		if (!ret)
+			ret = s9p_dp_train(dp, m);
 		if (!ret)
 			ret = s9p_dp_video_on(dp, m, false);
 		if (!ret)
@@ -428,7 +435,6 @@ static void pipe_enable(struct drm_simple_display_pipe *pipe,
 		if (ret)
 			s9p_dp_video_off(dp);
 	}
-out:
 	mutex_unlock(&dp->lock);
 	if (ret)
 		dp_log(dp, "modeset %dx%d failed: %d", m->hdisplay, m->vdisplay, ret);

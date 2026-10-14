@@ -89,9 +89,18 @@ A `drm_simple_display_pipe` with a DisplayPort connector, GEM DMA buffers,
 fbdev, and vblank from DECON2's frame-start IRQ (GIC SPI 194).
 
 - **Blanking keeps the link up.** When GNOME blanks the screen the driver
-  keeps the link trained and scans out a black frame; on unblank it only
-  switches the DECON source. Some USB-C/HDMI adapters go into a deep standby
-  without a video signal, where AUX stops answering until a replug.
+  keeps the link trained and scans out a black frame. Some USB-C/HDMI
+  adapters go into a deep standby without a video signal, where AUX stops
+  answering until a replug. On unblank the controller and PHY are reset and
+  the link retrained, as on the first start (see the alignment below).
+- **DECON2 starts on the DP vertical sync.** The DP controller's timing
+  generator paces DECON2 by pulling pixels, and runs whether DECON2 does or
+  not; DECON2 started mid-frame put its first pixel there, and the picture
+  came out shifted and wrapped by a random amount, with background lines at
+  the bottom. DECON2 is enabled right after `VSYNC_DET` (vsync and back porch
+  cover its start). Restarting DECON2, the video stream or even the training
+  under a running controller still left it shifted: only a fresh controller
+  (soft reset + PHY) starts aligned, so unblank goes through that.
 - **Imported GPU buffers.** The IDMA takes 32-bit addresses. The coherent DMA
   mask is 32 bits (dumb and fbdev buffers below 4 GiB) but the streaming mask
   is 64 bits, and `gem_prime_import_sg_table` refuses buffers the IDMA cannot
@@ -172,6 +181,7 @@ Module parameters go to `/etc/s9p-dp.conf` (one line, `name=value ...`):
 | 1 s freezes in GNOME after unplugging the monitor | output stopped under an enabled CRTC, every commit waited 100 ms for a vblank | `drm_crtc_vblank_off()` when the link goes away |
 | Desktop stutters on the monitor, `swiotlb buffer is full` | GPU buffers above 4 GiB bounced through swiotlb on every import attempt | 64-bit streaming mask, refuse unscannable imports |
 | No picture after the screen blanked, AUX dead | the adapter slept without a video signal | keep the link up with a black frame |
+| Picture shifted and wrapped (different every time), black lines at the bottom | DECON2 started at a random point of the DP frame; the controller kept its place across restarts | DECON2 on `VSYNC_DET`; controller + PHY reset on unblank (measured with an HDMI capture: offset 0 on boot and 6/6 unblanks) |
 | Reboot with a hub plugged waited for an unplug | VBUS stayed on into the bootloader | VBUS off in `.shutdown` |
 | AUX and the hub dead late at night | battery at 5 %: no PD contract | charge the phone |
 | Phone stopped charging after using a hub | the charger was left in a mode without charging when OTG went off; input limit stayed at 500 mA | `CNFG_00` back to charge mode when OTG goes off; input limit from the Type-C current the source advertises (up to 1.5 A) |
