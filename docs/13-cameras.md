@@ -91,7 +91,10 @@ reads `ACT_CTRL = 0x0001ff1c` (aborted). Ruled out the same night: the CMU_ISPPR
 `0x003f0002`, clock requested; `0x1620303c` and `0x16203074-7c` are holes that
 abort, as a SIGBUS from user space, which is the safe way to probe), the
 common DMA's clock gating (`COMMON_DMA_CLK_CTRL` bit 0 set: no change), and
-enabling the CSIS1 link (`link_en=1`: no change; its frame counter stays 0).
+enabling the CSIS1 link (`link_en=1`: no change; its frame counter stays 0),
+and enabling CSIS0's VC0 DMA as well (`0x162b0000`, in case the pattern feeds
+the first CSIS): no frame start anywhere, so the generator itself does not
+run.
 Next: the vendor's reset of the common DMA and the exact pattern start
 sequence (`csi_hw_s_dma_common_pattern`, `csi_hw_reset`), then a capture with
 the real sensor's colour bars (`0x0600 = 2`) through the link instead of the
