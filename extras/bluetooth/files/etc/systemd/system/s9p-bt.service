@@ -1,0 +1,14 @@
+[Unit]
+Description=Galaxy S9+ Bluetooth (BCM4361 on UART1)
+# BT_REG_ON is on the GPIO expander s9p-dp creates
+After=s9p-usbc-dp.service
+# skipped until extras/install.sh has put the modules in place
+ConditionPathIsDirectory=/lib/modules/%v/extra/s9p-bt
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/s9p-bt/load
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target graphical.target

@@ -1,13 +1,14 @@
 #!/bin/bash
-# Build the optional modules of extras/usb-c-display, extras/audio and
-# extras/notification-led for the kernel that build_stable.sh produced.
+# Build the optional modules of extras/usb-c-display, extras/audio,
+# extras/notification-led and extras/bluetooth for the kernel that
+# build_stable.sh produced.
 #
 #   sudo scripts/build/build_extras.sh          -> dist/extras/<kernel release>/
 #
 # Needs a finished stable build ($BUILD/src/mainline/out). The kernel image is
-# not touched: ALSA, ASoC, HID and the Cirrus madera drivers are built as
-# modules from a copy of its configuration (src/sound/extras.config), then
-# this port's own out-of-tree modules (src/usbc-dp, src/sound) against both.
+# not touched: ALSA, ASoC, HID, the Cirrus madera drivers and the Bluetooth
+# stack are built as modules from a copy of its configuration
+# (src/*/extras.config), then this port's own out-of-tree modules against both.
 set -euo pipefail
 PROJ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$PROJ/scripts/build/env.sh"
@@ -36,17 +37,17 @@ echo "=== extras configuration (out-extras) ==="
 mkdir -p out-extras
 cp out/.config out-extras/.config
 cp out/Module.symvers out-extras/
-grep -E '^CONFIG_' "$PROJ/src/sound/extras.config" | while IFS='=' read -r k v; do
+cat "$PROJ"/src/*/extras.config | grep -E '^CONFIG_' | while IFS='=' read -r k v; do
 	case $v in
 	y) ./scripts/config --file out-extras/.config -e "${k#CONFIG_}" ;;
 	m) ./scripts/config --file out-extras/.config -m "${k#CONFIG_}" ;;
 	esac
 done
 $K O=out-extras olddefconfig
-# guard: only sound/HID/madera may differ from the running kernel
+# guard: only sound/HID/madera/Bluetooth may differ from the running kernel
 if diff <(grep '^CONFIG_' out/.config | sort) <(grep '^CONFIG_' out-extras/.config | sort) |
-	grep '^[<>]' | grep -vE 'SND|SOUND|HID|MADERA|CS47L|ARIZONA|CS_DSP|WM_ADSP|AC97' ; then
-	echo "the extras configuration changes more than sound/HID: refusing" >&2
+	grep '^[<>]' | grep -vE 'SND|SOUND|HID|MADERA|CS47L|ARIZONA|CS_DSP|WM_ADSP|AC97|CONFIG_BT' ; then
+	echo "the extras configuration changes more than sound/HID/Bluetooth: refusing" >&2
 	exit 1
 fi
 $K O=out-extras modules_prepare
@@ -74,8 +75,16 @@ $K O=out-extras M="$WORK/sound" KBUILD_MODPOST_WARN=1 modules >/dev/null 2>&1 ||
 $K O=out-extras M="$M" KBUILD_EXTRA_SYMBOLS="$WORK/sound/Module.symvers" modules
 $K O=out-extras M="$WORK/sound" KBUILD_EXTRA_SYMBOLS="$M/Module.symvers" modules
 
+echo "=== Bluetooth: net/bluetooth, hci_uart (BCM), btbcm ==="
+cp -r net/bluetooth "$WORK/bt-net"
+cp -r drivers/bluetooth "$WORK/bt-drv"
+patch -s -p3 -d "$WORK/bt-drv" < "$PROJ/src/bluetooth/btbcm-bcm4361.patch"
+# hidp needs HID
+$K O=out-extras M="$WORK/bt-net" KBUILD_EXTRA_SYMBOLS="$WORK/hid/Module.symvers" modules
+$K O=out-extras M="$WORK/bt-drv" KBUILD_EXTRA_SYMBOLS="$WORK/bt-net/Module.symvers" modules
+
 echo "=== this port's modules ==="
-for d in usbc-dp sound; do
+for d in usbc-dp sound bluetooth; do
 	rm -rf "$WORK/$d-src"; cp -r "$PROJ/src/$d" "$WORK/$d-src"
 	$K O=out M="$WORK/$d-src" modules
 	cp "$WORK/$d-src/Module.symvers" "$WORK/$d-base.symvers"
@@ -88,17 +97,21 @@ rm -rf "$WORK/leds-src"; cp -r "$PROJ/src/leds" "$WORK/leds-src"
 $K O=out-extras M="$WORK/leds-src" modules
 
 OUT="$PROJ/dist/extras/$KREL"
-rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds}
+rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds,bluetooth}
 # =m in the stable kernel, needed by the extras (the image installs no modules)
 cp out/drivers/gpu/drm/display/drm_display_helper.ko out/drivers/media/cec/core/cec.ko \
-   out/drivers/leds/led-class-multicolor.ko out/drivers/input/ff-memless.ko "$OUT/kernel/"
+   out/drivers/leds/led-class-multicolor.ko out/drivers/input/ff-memless.ko \
+   out/crypto/kpp.ko out/crypto/ecc.ko out/crypto/ecdh_generic.ko out/crypto/aes.ko out/crypto/cmac.ko \
+   "$OUT/kernel/"
 cp "$WORK"/usbc-dp-src/*.ko "$OUT/usbc-dp/"
 cp "$WORK"/sound-src/*.ko "$OUT/sound/"
 find "$WORK/hid" -name '*.ko' -exec cp {} "$OUT/hid/" \;
 find "$WORK/sound" -name '*.ko' -exec cp {} "$OUT/alsa/" \;
 find "$M" -name '*.ko' -exec cp {} "$OUT/madera/" \;
 cp "$WORK"/leds-src/*.ko "$OUT/leds/"
+cp "$WORK"/bluetooth-src/*.ko "$OUT/bluetooth/"
+find "$WORK/bt-net" "$WORK/bt-drv" -name '*.ko' -exec cp {} "$OUT/bluetooth/" \;
 "${CROSS_COMPILE}strip" --strip-debug "$OUT"/*/*.ko
 (cd "$OUT" && sha256sum */*.ko > SHA256SUMS)
 echo "=== done: $(ls "$OUT"/*/*.ko | wc -l) modules in dist/extras/$KREL ==="
-echo "copy the repository (with dist/) to the phone, then: sudo extras/install.sh usb-c-display / audio"
+echo "copy the repository (with dist/) to the phone, then: sudo extras/install.sh usb-c-display / audio / notification-led / bluetooth"

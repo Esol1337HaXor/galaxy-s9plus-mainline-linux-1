@@ -101,7 +101,7 @@ system ([`image/common/README.md`](../image/common/README.md)), and
 | `s9p-touch-power` + service | lifts the charger input limit from 375 mA (what TWRP leaves) to 500 mA. The touch rails and the GPU rail are set by the kernel (`s9p-acpm`, `s9p-g3d`) |
 | `s9p-stability` + service | keeps the idle-only voltage reductions off (see [06-known-issues.md](06-known-issues.md)) |
 | `s9p-wifi-guard` + service | brings Wi-Fi back after NetworkManager gave up on a failed rekey |
-| `hciattach-bcm4361.service` + `brcm/bcm4361B2_semco.hcd` | Bluetooth attach, **installed but not enabled**: the kernel is built without Bluetooth |
+| `hciattach-bcm4361.service` + `brcm/bcm4361B2_semco.hcd` | old Bluetooth attach, **installed but not enabled**: it does not work with the serdev UART; use `extras/bluetooth` |
 | `brcm/brcmfmac4361-pcie.*` | Wi-Fi firmware on disk too (the stable kernel has it built in) |
 | `logind.conf.d`, `sleep.conf.d`, masked sleep targets | no suspend: the big cores do not come back from it |
 | `system.conf.d/s9p-watchdog.conf` | systemd feeds the hardware watchdog (`RuntimeWatchdogSec=30s`) |

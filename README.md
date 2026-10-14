@@ -23,7 +23,7 @@ to use the phone as a small desktop computer, even one with a broken screen.
 | Storage | ✅ | Internal UFS 2.1, Ubuntu boots from it |
 | Touchscreen | ✅ | S6SY761 multitouch |
 | Wi-Fi | ✅ | BCM4361 (`brcmfmac`) |
-| Bluetooth | ❌ | Not in the kernel yet |
+| Bluetooth | ✅ | BCM4361 over UART (`hci_bcm`), the phone's own address from EFS |
 | USB-C DisplayPort | ✅ | External monitor through USB-C to HDMI adapters and docks, up to 1080p60, hot-plug in both orientations |
 | USB host | ✅ | Keyboards, mice and storage on the adapter's hub (USB 2.0) |
 | HDMI audio | ✅ | Sound on the external monitor |
@@ -130,6 +130,7 @@ sudo extras/install.sh                    # list them
 sudo extras/install.sh usb-c-display      # external monitor, USB host, HDMI audio
 sudo extras/install.sh audio              # speaker and headphones (reboot after)
 sudo extras/install.sh notification-led   # RGB LED: orange charging, green full
+sudo extras/install.sh bluetooth          # Bluetooth (needs usb-c-display)
 sudo extras/install.sh power-profiles     # --remove takes any of them out again
 ```
 
@@ -138,6 +139,7 @@ sudo extras/install.sh power-profiles     # --remove takes any of them out again
 | [usb-c-display](extras/usb-c-display/) | External monitor over USB-C, USB host on the adapter's hub, HDMI audio. Broken screen? `sudo systemctl enable s9p-panel-off` makes the monitor the only display |
 | [audio](extras/audio/) | Built-in speaker and headphone jack; copies Samsung's DSP firmware from the phone's own `VENDOR` partition |
 | [notification-led](extras/notification-led/) | The RGB notification LED, following the battery by default; any LED trigger |
+| [bluetooth](extras/bluetooth/) | Bluetooth; patchram from the phone's `VENDOR` partition, address from `EFS`. Needs usb-c-display |
 | [power-profiles](extras/power-profiles/) | CPU/GPU ceilings and Wi-Fi power save as three profiles, following GNOME's power mode |
 | [flight-recorder](extras/flight-recorder/) | Every kernel message and a state line per minute, fsync'ed, for hunting hangs |
 | [usb-apt-proxy](extras/usb-apt-proxy/) | apt through a proxy on the PC the phone is cabled to |

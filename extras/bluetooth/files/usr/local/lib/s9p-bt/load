@@ -1,0 +1,7 @@
+#!/bin/sh
+# Add the Bluetooth UART (s9p-bt-board): serdev hands it to hci_bcm, which
+# powers the BCM4361 and loads brcm/BCM.samsung,star2lte.hcd. The phone's own
+# address comes in as bd_addr from /etc/modprobe.d/s9p-bt.conf (written by
+# extras/bluetooth from EFS).
+modprobe hci_uart
+modprobe s9p-bt-board || { echo "s9p-bt-board failed (is s9p-dp loaded? see dmesg)" >&2; exit 1; }

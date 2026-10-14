@@ -1,0 +1,54 @@
+#!/bin/sh
+# Install the modules built by scripts/build/build_extras.sh, the patchram from
+# the phone's own Android VENDOR partition and the address from EFS, then load.
+set -eu
+D=$(cd "$(dirname "$0")" && pwd)
+K=$(uname -r)
+SRC=$D/../../dist/extras/$K
+[ -f "$SRC/SHA256SUMS" ] || { echo "no modules for kernel $K in dist/extras: run scripts/build/build_extras.sh" >&2; exit 1; }
+(cd "$SRC" && sha256sum -c --quiet SHA256SUMS) || { echo "dist/extras/$K: checksum mismatch" >&2; exit 1; }
+[ -e /var/lib/s9p-extras/usb-c-display ] ||
+	echo "warning: BT_REG_ON is on the expander s9p-dp creates: install usb-c-display too" >&2
+M=/lib/modules/$K/extra
+install -d "$M/s9p-bt" "$M/s9p-common"
+install -m644 "$SRC"/bluetooth/*.ko "$M/s9p-bt/"
+install -m644 "$SRC"/kernel/*.ko "$SRC"/hid/*.ko "$M/s9p-common/"
+mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/bluetooth
+depmod -a "$K"
+# hciattach does not work with the serdev UART
+systemctl disable --now hciattach-bcm4361.service 2>/dev/null || true
+
+# patchram and address: from this phone's VENDOR and EFS partitions (read-only)
+FW="/lib/firmware/brcm/BCM.samsung,star2lte.hcd"
+mnt_copy() {	# partition, file inside it, destination
+	[ -e "/dev/disk/by-partlabel/$1" ] || return 1
+	mnt=$(mktemp -d)
+	mount -o ro "/dev/disk/by-partlabel/$1" "$mnt" || { rmdir "$mnt"; return 1; }
+	r=0; cp "$mnt/$2" "$3" || r=1
+	umount "$mnt"; rmdir "$mnt"
+	return $r
+}
+if [ ! -e "$FW" ]; then
+	if mnt_copy VENDOR firmware/bcm4361B2_semco.hcd "$FW"; then
+		echo "Bluetooth patchram copied from the VENDOR partition"
+	elif [ -e /lib/firmware/brcm/bcm4361B2_semco.hcd ]; then
+		ln -s bcm4361B2_semco.hcd "$FW"
+		echo "no VENDOR partition: using the image's bcm4361B2_semco.hcd"
+	else
+		echo "no Bluetooth patchram: copy bcm4361B2_semco.hcd to $FW by hand" >&2
+	fi
+fi
+# the address, as a module option (generated: it is this phone's, not in git)
+C=/etc/modprobe.d/s9p-bt.conf
+if [ ! -s "$C" ]; then
+	T=$(mktemp)
+	if mnt_copy EFS bluetooth/bt_addr "$T" &&
+	   A=$(tr -d ' \r\n' < "$T") && echo "$A" | grep -qE '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'; then
+		echo "options s9p_bt_board bd_addr=$A" > "$C"
+		echo "Bluetooth address taken from the EFS partition"
+	else
+		echo "no address in EFS: the controller keeps the chip's default one" >&2
+	fi
+	rm -f "$T"
+fi
+systemctl restart s9p-bt.service

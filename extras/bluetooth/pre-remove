@@ -1,0 +1,8 @@
+#!/bin/sh
+# Remove the modules; the shared ones only if no other extra uses them. The
+# patchram stays (it is the phone's own).
+K=$(uname -r)
+modprobe -r s9p-bt-board hci_uart 2>/dev/null || true
+rm -rf "/lib/modules/$K/extra/s9p-bt" /var/lib/s9p-extras/bluetooth /etc/modprobe.d/s9p-bt.conf
+ls /var/lib/s9p-extras/* >/dev/null 2>&1 || rm -rf "/lib/modules/$K/extra/s9p-common"
+depmod -a "$K"
