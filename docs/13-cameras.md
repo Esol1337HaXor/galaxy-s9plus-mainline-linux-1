@@ -77,3 +77,18 @@ powers the domain on itself: no SMC was sent. Read-only probes, one at a time
 So the TZPC is open and the receiver is clocked. Next: the CMU_TOP bus divider
 (ISPPRE at /16, 25 MHz today), the CSIS1 D-PHY (PMU isolation `0x14060730`),
 and the DMA test pattern into a buffer below 4 GiB.
+
+### Phase 2a, first attempt (2026-10-15): no frame yet
+
+`src/camera/s9p-csis-test.c` sets the ISPPRE bus to 200 MHz (CMU_TOP
+`0x1a241890` = 1, from /16), configures CSIS1 (two lanes, RAW10 on VC0, the
+vendor's interrupt masks), the VC0 write DMA (`0x162c0000`, 8 addresses on
+one buffer below 4 GiB, `CTRL = 3`) and the common DMA's test pattern
+(`0x162f0000`: priorities, SRAM split, 800x600 at 30 fps), then polls for the
+frame end. Every register took its value, but none of the four CSIS DMAs
+(`0x162b0000`-`0x162e0000`) reported a frame start within a second, and VC0
+reads `ACT_CTRL = 0x0001ff1c` (aborted). To check next: the Q-channels of
+CMU_ISPPRE (one register in `0x16203000-0x1620307c` aborts on read, so probe
+them one at a time from user space, where an abort is a SIGBUS and not a
+reset), the common DMA's clock gating (`COMMON_DMA_CLK_CTRL`), and whether
+the pattern needs the CSIS link enabled after all.
