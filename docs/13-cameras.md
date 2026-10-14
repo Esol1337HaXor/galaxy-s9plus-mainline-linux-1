@@ -6,7 +6,7 @@ application see, without Samsung's ISP. The plan, from the vendor kernel:
 | phase | what | state |
 |---|---|---|
 | 1 | front camera powered, sensor answering on I2C | **done** (2026-10-15) |
-| 2 | CSIS v5.1 receiver + its DMA writing RAW frames to memory (test pattern first) | |
+| 2 | CSIS v5.1 receiver + its DMA writing RAW frames to memory (test pattern first) | block reachable (2026-10-15), capture not started |
 | 3 | V4L2 drivers: S5K3H1 sensor (v4l2-cci) and CSIS, media controller | needs `MEDIA_SUPPORT` (can be modules) |
 | 4 | libcamera "simple" pipeline with the software ISP, PipeWire | |
 | 5 | rear (S5K2L3) and tele (S5K3M3) cameras, autofocus | |
@@ -55,3 +55,25 @@ echo 1 > /sys/module/s9p_cam_board/parameters/mclk
 
 Power-down is the reverse: `mclk=0`, `rst=0`, LDO16, LDO5, LDO13, LDO6 off
 (write the same values with bit 7 clear).
+
+## Phase 2: first look at the ISPPRE block
+
+Every access in `0x162xxxxx` goes through a TZPC that the secure world must
+have opened; a rejected access is an SError (a reset). The `pd-isppre` domain
+is on from the bootloader (PMU `0x14064048` = 0xf, status `0x0010000f`), and
+the vendor only restores the TZPC (SMC `0x82000410`, `0x16210204`) after it
+powers the domain on itself: no SMC was sent. Read-only probes, one at a time
+(2026-10-15), all answered:
+
+| address | what | value |
+|---|---|---|
+| `0x16200100` | CMU_ISPPRE user mux | 0x10 (bus clock from CMU_TOP) |
+| `0x16201804` | DIV_BUSP | 1 |
+| `0x16203024` / `0x1620305c` | QCH CSIS1 / SysMMU | 0x003f0002 |
+| `0x16210400` | SYSREG_ISPPRE | 0x3222 |
+| `0x16310000` | SysMMU `MMU_CTRL` | 0x4 (bit 0 clear: bypass) |
+| `0x16240000` | CSIS1 `CSIS_VERSION` | 0x05010000 (v5.1) |
+
+So the TZPC is open and the receiver is clocked. Next: the CMU_TOP bus divider
+(ISPPRE at /16, 25 MHz today), the CSIS1 D-PHY (PMU isolation `0x14060730`),
+and the DMA test pattern into a buffer below 4 GiB.
