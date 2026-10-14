@@ -141,6 +141,14 @@ now arrives in time on 98 % of the transitions; the schedutil rate limit
 | PLL timeouts / transitions | 722 / ~760 | 14 / 807 |
 | M3 core: worst burst | 6.93 ms | 3.88 ms |
 
+### Boost (2704/1794 MHz) and the thermal ceiling
+
+`s9p_cpufreq.boost=1` was run on 2026-10-15 under a 150 s single-core SHA-256
+load with a digest check (0 wrong rounds out of 2601, no reset), but the M3
+core spent the run at 2327 and 1794 MHz: at 77-80 C the thermal cap steps it
+down before 2704 MHz matters. Sustained, the ceiling is thermal, not the
+boost; it stays off by default.
+
 ## Where it stands
 
 | | before | after |
