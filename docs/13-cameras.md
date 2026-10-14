@@ -87,8 +87,12 @@ one buffer below 4 GiB, `CTRL = 3`) and the common DMA's test pattern
 (`0x162f0000`: priorities, SRAM split, 800x600 at 30 fps), then polls for the
 frame end. Every register took its value, but none of the four CSIS DMAs
 (`0x162b0000`-`0x162e0000`) reported a frame start within a second, and VC0
-reads `ACT_CTRL = 0x0001ff1c` (aborted). To check next: the Q-channels of
-CMU_ISPPRE (one register in `0x16203000-0x1620307c` aborts on read, so probe
-them one at a time from user space, where an abort is a SIGBUS and not a
-reset), the common DMA's clock gating (`COMMON_DMA_CLK_CTRL`), and whether
-the pattern needs the CSIS link enabled after all.
+reads `ACT_CTRL = 0x0001ff1c` (aborted). Ruled out the same night: the CMU_ISPPRE Q-channels (all
+`0x003f0002`, clock requested; `0x1620303c` and `0x16203074-7c` are holes that
+abort, as a SIGBUS from user space, which is the safe way to probe), the
+common DMA's clock gating (`COMMON_DMA_CLK_CTRL` bit 0 set: no change), and
+enabling the CSIS1 link (`link_en=1`: no change; its frame counter stays 0).
+Next: the vendor's reset of the common DMA and the exact pattern start
+sequence (`csi_hw_s_dma_common_pattern`, `csi_hw_reset`), then a capture with
+the real sensor's colour bars (`0x0600 = 2`) through the link instead of the
+pattern generator.

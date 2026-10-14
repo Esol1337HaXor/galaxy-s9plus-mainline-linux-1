@@ -30,6 +30,9 @@
 static unsigned int width = 800, height = 600;
 module_param(width, uint, 0444);
 module_param(height, uint, 0444);
+static bool link_en;
+module_param(link_en, bool, 0644);
+MODULE_PARM_DESC(link_en, "also enable the CSIS1 link (the vendor leaves it off in pattern mode)");
 static bool pack12 = true;
 module_param(pack12, bool, 0644);
 MODULE_PARM_DESC(pack12, "DMA0_FMT.PACK12 (RAW10 packed); 0: 16 bit per pixel");
@@ -81,6 +84,8 @@ static int capture(void)
 	writel(h << 16 | w, csis + 0x44);
 	writel(0x011fff1f, csis + 0x10);
 	writel(0x0000fff0, csis + 0x18);
+	if (link_en)
+		rmw(csis + 0x04, 0, BIT(0));
 
 	/* VC0 write DMA, OTF input */
 	writel(pack12 ? 0x8 : 0x0, dma + 0x04);
@@ -106,6 +111,7 @@ static int capture(void)
 
 	ret = readl_poll_timeout(cmn + 0x08, s, s & BIT(8), 1000, 1000000);
 	writel(0, dma + 0x00);
+	rmw(csis + 0x04, BIT(0), 0);
 	rmw(common + 0x20, BIT(31), 0);
 	last_src = s;
 	writel(s, cmn + 0x08);
