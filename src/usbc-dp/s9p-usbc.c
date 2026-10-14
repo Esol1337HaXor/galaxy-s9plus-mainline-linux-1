@@ -30,6 +30,7 @@
 #include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
+#include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
@@ -63,6 +64,7 @@
 #define REG_CC_STATUS0		0x0a
 #define  CC_STATUS0_PIN(x)	(((x) >> 6) & 3)	/* 1 CC1, 2 CC2 */
 #define  CC_STATUS0_STAT(x)	((x) & 7)		/* 1 SNK, 2 SRC */
+#define  CC_STATUS0_CCI(x)	(((x) >> 4) & 3)	/* Rp current: 1 0.5 A, 2 1.5 A, 3 3 A */
 #define  CCSTAT_NONE		0
 #define  CCSTAT_SINK		1
 #define  CCSTAT_SOURCE		2
@@ -111,6 +113,9 @@
 /* charger (0x69): its regmap has reg_base 0xB0, offsets are relative */
 #define CHG_CNFG_00		MAX77705_CHG_REG_CNFG_00
 #define  CHG_CNFG_00_OTG_CTRL	(BIT(1) | BIT(3))	/* OTG | BOOST */
+#define  CHG_CNFG_00_MODE	GENMASK(3, 0)		/* BOOST OTG BUCK CHG */
+#define  CHG_CNFG_00_MODE_CHG	0x05			/* charger + buck */
+#define  CHG_CNFG_00_MODE_CHG_OTG 0x0f			/* + OTG boost, as before */
 
 static int path = COM_USB;
 module_param(path, int, 0644);
@@ -141,6 +146,7 @@ struct s9p_usbc {
 	u8 last_cmd[33];
 	int last_cmd_len;
 	bool otg_on;
+	int in_limit;			/* input current limit set as sink (uA) */
 	int nego_retries;		/* POWER_NEGO resends of the current 0x48 */
 	bool init_done;
 	u16 vid, pid;
@@ -296,13 +302,42 @@ static void set_otg(struct s9p_usbc *u, bool on)
 		ulog(u, "CONTROL1 <= %02x before VBUS: %d", d,
 		     usbc_cmd(u, OPCODE_CONTROL1_WRITE, &d, 1, r, 1));
 	}
-	ret = regmap_update_bits(u->chg, CHG_CNFG_00, CHG_CNFG_00_OTG_CTRL,
-				 on ? CHG_CNFG_00_OTG_CTRL : 0);
+	/*
+	 * Off: back to charge + buck explicitly (not only clearing the OTG
+	 * bits), so that no earlier mode can leave the battery not charging.
+	 */
+	ret = regmap_update_bits(u->chg, CHG_CNFG_00, CHG_CNFG_00_MODE,
+				 on ? CHG_CNFG_00_MODE_CHG_OTG : CHG_CNFG_00_MODE_CHG);
 	ulog(u, "VBUS (OTG boost) %s: %d", on ? "on" : "off", ret);
 	if (!ret) {
 		u->otg_on = on;
 		notify(u, S9P_USBC_ROLE);
 	}
+}
+
+/*
+ * Sink: the port's MUIC driver used to set the charger's input limit; with it
+ * replaced, nobody did and the phone sat at 500 mA, less than it draws with a
+ * desktop. Follow the Type-C current the source advertises on CC (capped at
+ * 1.5 A: no PD contract, 5 V only).
+ */
+static void set_input_limit(struct s9p_usbc *u, int cc0)
+{
+	static const int ua[] = { 0, 500000, 1500000, 1500000 };
+	union power_supply_propval v = { .intval = ua[CC_STATUS0_CCI(cc0)] };
+	struct power_supply *psy;
+	int ret;
+
+	if (!v.intval || v.intval == u->in_limit)
+		return;
+	psy = power_supply_get_by_name("max77705-charger");
+	if (!psy)
+		return;
+	ret = power_supply_set_property(psy, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &v);
+	power_supply_put(psy);
+	ulog(u, "input current limit %d mA (Rp %u): %d", v.intval / 1000, CC_STATUS0_CCI(cc0), ret);
+	if (!ret)
+		u->in_limit = v.intval;
 }
 
 static void reset_dp(struct s9p_usbc *u)
@@ -556,8 +591,10 @@ static void handle_cc(struct s9p_usbc *u)
 		break;
 	case CCSTAT_SINK:
 		set_otg(u, false);
+		set_input_limit(u, cc0);
 		break;
 	case CCSTAT_NONE:
+		u->in_limit = 0;
 		set_otg(u, false);
 		reset_dp(u);
 		break;

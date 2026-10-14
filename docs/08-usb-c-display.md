@@ -174,3 +174,4 @@ Module parameters go to `/etc/s9p-dp.conf` (one line, `name=value ...`):
 | No picture after the screen blanked, AUX dead | the adapter slept without a video signal | keep the link up with a black frame |
 | Reboot with a hub plugged waited for an unplug | VBUS stayed on into the bootloader | VBUS off in `.shutdown` |
 | AUX and the hub dead late at night | battery at 5 %: no PD contract | charge the phone |
+| Phone stopped charging after using a hub | the charger was left in a mode without charging when OTG went off; input limit stayed at 500 mA | `CNFG_00` back to charge mode when OTG goes off; input limit from the Type-C current the source advertises (up to 1.5 A) |
