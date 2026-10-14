@@ -121,6 +121,26 @@ way. Always:
     loginctl terminate-user ubuntu
     systemctl restart gdm
 
+## 5. PLL relock -- every frequency change stalled the cluster for 3.3 ms
+
+**Symptom:** `pll_lock_timeouts` grew with every frequency change: 3348 of
+3541 transitions in the first three minutes after boot.
+
+**Cause:** a transition parks the whole cluster on the 26 MHz OSC while the
+PLL relocks, then waited up to 3 ms (a sleeping poll) for `PLL_CON0.STABLE`
+plus 300 us when it did not come -- 3.3 ms of a cluster at 26 MHz, on almost
+every change. With schedutil that added up to seconds per minute.
+
+**Fix:** an atomic poll of 100 us (eight times the programmed lock time,
+`LOCKTIME = 150 * P` OSC cycles, about 12 us), then a 50 us margin. STABLE
+now arrives in time on 98 % of the transitions; the schedutil rate limit
+(`transition_delay_us`) went from 20 to 5 ms.
+
+| 300 bursts of 4 ms work, 30 ms rests | before | after |
+|---|---|---|
+| PLL timeouts / transitions | 722 / ~760 | 14 / 807 |
+| M3 core: worst burst | 6.93 ms | 3.88 ms |
+
 ## Where it stands
 
 | | before | after |

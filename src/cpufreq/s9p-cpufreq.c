@@ -324,11 +324,18 @@ static int s9p_set_step(struct s9p_cluster *c, const struct s9p_pll_step *step)
 		((u32)step->p << 8) | step->s, c->pll_con0);
 	writel_relaxed(v | PLL_CON0_ENABLE | ((u32)step->m << 16) |
 		((u32)step->p << 8) | step->s, c->pll_con0);
-	ret = readl_poll_timeout(c->pll_con0, v, v & PLL_CON0_STABLE,
-				10, 3000);
+	/*
+	 * The lock counter (LOCKTIME = 150 * P cycles of the 26 MHz OSC, about
+	 * 12 us) bounds the relock; STABLE is seldom reported on these PLLs.
+	 * Waiting 3 ms for it, with the whole cluster on the 26 MHz OSC, cost
+	 * every transition 3.3 ms of a stalled cluster (95 % of them timed
+	 * out): poll for eight lock times, then give it a margin and go on.
+	 */
+	ret = readl_poll_timeout_atomic(c->pll_con0, v, v & PLL_CON0_STABLE,
+					2, 100);
 	if (ret) {
 		s9p_pll_lock_timeouts++;
-		udelay(300);
+		udelay(50);
 		pr_info_once("s9p-cpufreq: %s PLL without STABLE at %u kHz (con0=%08x), continuing\n",
 			     c->name, step->freq_khz, v);
 	}
@@ -430,7 +437,8 @@ static int s9p_init(struct cpufreq_policy *policy)
 
 	policy->driver_data = c;
 	policy->freq_table = c->freq_table;
-	policy->transition_delay_us = 20 * USEC_PER_MSEC;
+	/* a transition costs ~0.5 ms (BUCK over ACPM, PLL relock); see above */
+	policy->transition_delay_us = 5 * USEC_PER_MSEC;
 
 	cpumask_clear(policy->cpus);
 	for_each_possible_cpu(cpu)
