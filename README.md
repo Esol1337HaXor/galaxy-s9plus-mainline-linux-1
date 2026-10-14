@@ -23,7 +23,7 @@ to use the phone as a small desktop computer, even one with a broken screen.
 | Storage | ✅ | Internal UFS 2.1, Ubuntu boots from it |
 | Touchscreen | ✅ | S6SY761 multitouch |
 | Wi-Fi | ✅ | BCM4361 (`brcmfmac`) |
-| Bluetooth | ✅ | BCM4361 over UART (`hci_bcm`), the phone's own address from EFS |
+| Bluetooth | ✅ | BCM4361 over UART (`hci_bcm`), the phone's own address from EFS; in GNOME Settings (needs a kernel built after 2026-10-14, with rfkill) |
 | USB-C DisplayPort | ✅ | External monitor through USB-C to HDMI adapters and docks, up to 1080p60, hot-plug in both orientations |
 | USB host | ✅ | Keyboards, mice and storage on the adapter's hub (USB 2.0) |
 | HDMI audio | ✅ | Sound on the external monitor |

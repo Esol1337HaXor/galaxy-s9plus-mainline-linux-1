@@ -21,7 +21,7 @@ BCM4361 (BT part)
 | `s9p-bt-board` | opens the UART_BT clock gates, pulses the block's USI reset (`USI_CON`, `USI_OPTION = CLKREQ_ON`, as the vendor does on every clock enable), muxes gpq0, and adds `serial@10840000` (`samsung,exynos8895-uart`, 256-byte FIFO, the 200 MHz clock stub) with a `bluetooth` child |
 | upstream `hci_bcm` | `brcm,bcm4345c5` (there is no 4361 compatible; this one sets no quirks): `shutdown-gpios` = BT_REG_ON, `device-wakeup-gpios`, `host-wakeup-gpios`, `max-speed` 3 Mbaud, `local-bd-address` |
 | `btbcm` + `src/bluetooth/btbcm-bcm4361.patch` | the BCM4361B2's default address is marked invalid, so the address from the DT is used; LE Read Transmit Power is marked broken on this board (advertised, fails, and aborted the init) |
-| Kconfig `src/bluetooth/extras.config` | `BT=m` and friends; `RFKILL` must stay off (CFG80211 is built in and depends on `RFKILL \|\| !RFKILL`) |
+| Kconfig `src/bluetooth/extras.config` | `BT=m` and friends, as modules. `RFKILL` is built into the stable kernel (`build71.sh`): GNOME only shows Bluetooth through rfkill, and as a module it would turn the built-in cfg80211 into one (`depends on RFKILL \|\| !RFKILL`) |
 
 The UART block clock is 200 MHz (CMU divider at /1), the same as the port's
 clock stub, so the baud rates samsung_tty computes are exact.
@@ -41,8 +41,6 @@ into `local-bd-address`.
 ## Known limits
 
 - Needs `extras/usb-c-display` (s9p-dp creates the expander with BT_REG_ON).
-- No rfkill: `rfkill list` does not show Bluetooth; it is switched off through
-  BlueZ (GNOME Settings works).
 - SCO audio over the PCM link (calls on a headset) goes through ABOX UAIF3 on
   stock and is not done; A2DP over HCI is not affected.
 
@@ -53,3 +51,4 @@ into `local-bd-address`.
 | hci0 registered but never listed by mgmt | `Opcode 0x204b failed: -38`: LE Read Transmit Power advertised but not supported, init aborted | quirk in the btbcm patch |
 | every phone with the same address | chip default address, not in btbcm's list | mark it invalid, `local-bd-address` from EFS |
 | boot unit hung | `btmgmt` waits forever with stdin on `/dev/null` | no btmgmt: the address goes through the DT |
+| GNOME Settings: "No Bluetooth Found" while BlueZ works | GNOME looks for the adapter through rfkill, and the kernel had none | `RFKILL=y` in the stable kernel |
