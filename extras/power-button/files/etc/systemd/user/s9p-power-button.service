@@ -1,0 +1,14 @@
+[Unit]
+Description=Galaxy S9+ power button: short press screen off, long press power menu
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# GNOME would otherwise show the power off dialog on every press
+ExecStartPre=/usr/bin/gsettings set org.gnome.settings-daemon.plugins.power power-button-action nothing
+ExecStart=/usr/local/lib/s9p-power-button/s9p-power-button
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

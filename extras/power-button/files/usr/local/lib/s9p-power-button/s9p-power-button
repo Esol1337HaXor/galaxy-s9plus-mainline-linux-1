@@ -1,0 +1,80 @@
+#!/usr/bin/python3
+# Galaxy S9+ power button (extras/power-button), in the user's GNOME session.
+#
+#   short press  lock the session and turn the screen off; if the screen is
+#                already off, turn it on (the lock screen shows)
+#   long press   the power off / restart dialog
+#
+# Suspend cannot resume on this port (docs/06-known-issues.md), so a short
+# press does what a phone does instead. GNOME's own handling of the key is
+# set to "nothing" by the unit.
+import os, re, select, struct, subprocess, time
+
+DEV = '/dev/input/by-path/platform-gpio-keys-event'
+LONG = float(os.environ.get('S9P_POWER_LONG_MS', '700')) / 1000
+KEY_POWER, EV_KEY = 116, 1
+EVENT = struct.Struct('<qqHHi')
+
+
+def call(dest, path, method, *args, out=False):
+    r = subprocess.run(['gdbus', 'call', '--session', '-d', dest, '-o', path, '-m', method, *args],
+                       capture_output=True, text=True, timeout=10)
+    return r.stdout if out else r.returncode == 0
+
+
+def power_save(mode=None):
+    dc = ('org.gnome.Mutter.DisplayConfig', '/org/gnome/Mutter/DisplayConfig')
+    if mode is None:
+        m = re.search(r'<(-?\d+)>', call(*dc, 'org.freedesktop.DBus.Properties.Get',
+                                         'org.gnome.Mutter.DisplayConfig', 'PowerSaveMode', out=True))
+        return int(m.group(1)) if m else 0
+    call(*dc, 'org.freedesktop.DBus.Properties.Set', 'org.gnome.Mutter.DisplayConfig',
+         'PowerSaveMode', f'<{mode}>')
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def short_press():
+    if power_save() != 0:
+        log('short press: screen on')
+        power_save(0)
+        return
+    log('short press: lock, screen off')
+    call('org.gnome.ScreenSaver', '/org/gnome/ScreenSaver', 'org.gnome.ScreenSaver.Lock')
+    time.sleep(0.3)
+    power_save(3)
+
+
+def long_press():
+    log('long press: power off dialog')
+    if power_save() != 0:
+        power_save(0)
+    call('org.gnome.SessionManager', '/org/gnome/SessionManager', 'org.gnome.SessionManager.Shutdown')
+
+
+def main():
+    fd = os.open(DEV, os.O_RDONLY)
+    down = None
+    while True:
+        timeout = None if down is None else max(0, down + LONG - time.monotonic())
+        r, _, _ = select.select([fd], [], [], timeout)
+        if not r:                       # held long enough
+            down = None
+            long_press()
+            continue
+        data = os.read(fd, EVENT.size * 16)
+        for i in range(0, len(data) - EVENT.size + 1, EVENT.size):
+            _, _, typ, code, value = EVENT.unpack_from(data, i)
+            if typ != EV_KEY or code != KEY_POWER or value == 2:
+                continue
+            if value == 1:
+                down = time.monotonic()
+            elif down is not None:      # released before LONG
+                down = None
+                short_press()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,4 @@
+#!/bin/sh
+# A user unit: enabled for every user, it starts with the next GNOME session.
+systemctl --global enable s9p-power-button.service
+echo "log out and back in (or reboot) to use it"

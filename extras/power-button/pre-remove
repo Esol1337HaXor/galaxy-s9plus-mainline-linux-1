@@ -1,0 +1,3 @@
+#!/bin/sh
+systemctl --global disable s9p-power-button.service
+echo "GNOME's power button action stays \"nothing\": gsettings reset org.gnome.settings-daemon.plugins.power power-button-action"
