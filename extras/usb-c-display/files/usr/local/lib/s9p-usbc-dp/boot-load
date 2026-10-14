@@ -1,0 +1,13 @@
+#!/bin/sh
+# Load the USB-C DisplayPort modules at boot (s9p-usbc-dp.service).
+# Anti-loop guard: if the previous boot died while loading them (a hang, the
+# watchdog, TWRP), do not try again until the marker is removed by hand.
+F=/var/lib/s9p-usbc-dp/loading
+mkdir -p /var/lib/s9p-usbc-dp
+if [ -e "$F" ]; then
+	echo "s9p-usbc-dp: the previous boot hung while loading; not loading (rm $F to retry)"
+	exit 0
+fi
+touch "$F"; sync
+/usr/local/sbin/s9p-dp load
+sleep 5; rm -f "$F"; sync

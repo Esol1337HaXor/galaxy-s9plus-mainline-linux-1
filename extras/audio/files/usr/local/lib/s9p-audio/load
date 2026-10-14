@@ -1,0 +1,15 @@
+#!/bin/sh
+# Internal audio of the Galaxy S9+ (s9p-audio.service). Order: codec and amplifier
+# buses + codec power (LDO34 via ACPM) -> codec (madera) -> ABOX firmware -> the
+# amplifiers -> the ASoC card. ABOX boots once per phone boot.
+set -u
+loaded() { lsmod | grep -q "^$1 "; }
+loaded s9p_audio_board || modprobe s9p-audio-board || exit 1
+modprobe madera-spi || exit 1
+for i in $(seq 1 20); do [ -e /sys/bus/platform/devices/cs47l92-codec/driver ] && break; sleep 0.25; done
+loaded s9p_abox || modprobe s9p-abox || exit 1
+grep -q BOOT_DONE /sys/kernel/debug/s9p-abox/log 2>/dev/null || { echo "s9p-audio: ABOX firmware did not boot"; exit 1; }
+modprobe snd-soc-core
+loaded s9p_max98512 || modprobe s9p-max98512 || echo "s9p-audio: no amplifiers (headphones only)"
+sleep 0.5
+loaded s9p_abox_pcm || modprobe s9p-abox-pcm || exit 1

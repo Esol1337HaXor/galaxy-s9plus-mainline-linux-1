@@ -1,0 +1,69 @@
+#!/bin/bash
+# USB-C DisplayPort output of the Galaxy S9+ (extras/usb-c-display). As root:
+#   s9p-dp load            load the modules (takes the MAX77705 over from the MUIC driver)
+#   s9p-dp status          Type-C, link, DECON and DRM state
+#   s9p-dp bist [vic]      colour bars made by the DP controller itself (no DECON)
+#   s9p-dp pattern [vic]   DECON2 scanning a test pattern from memory
+#   s9p-dp cmd "..."       any command of /sys/kernel/debug/s9p-dp/cmd
+#   s9p-dp logs            save every log to ./logs-dp-<date>/
+#   s9p-dp unload          remove the modules, back to the MUIC driver
+# vic: 16 = 1920x1080@60 (default), 4 = 1280x720@60, 1 = 640x480@60
+# Module parameters: /etc/s9p-dp.conf, e.g. "max_rate=0x14" (see the docs).
+set -u
+DBG=/sys/kernel/debug
+mountpoint -q $DBG || mount -t debugfs none $DBG
+muic_dev() { ls /sys/bus/i2c/drivers/s9p-max77705-muic/ 2>/dev/null | grep -E '^[0-9]+-0025$'; }
+loaded() { lsmod | grep -q "^$1 "; }
+
+case "${1:-}" in
+load)
+	modprobe cec && modprobe drm_display_helper || exit 1
+	dev=$(muic_dev)
+	if [ -n "$dev" ]; then
+		echo "unbinding $dev from the built-in MUIC driver"
+		echo "$dev" > /sys/bus/i2c/drivers/s9p-max77705-muic/unbind
+	fi
+	if loaded s9p_usbc; then
+		[ -n "$dev" ] && echo "$dev" > /sys/bus/i2c/drivers/s9p-max77705-usbc/bind 2>/dev/null
+	else
+		modprobe s9p-usbc || exit 1
+	fi
+	sleep 1
+	# USB host role before DP: it rebinds the DWC3 and its PHY
+	loaded s9p_usbhost || modprobe s9p-usbhost || echo "warning: s9p-usbhost not loaded (no USB on the hub)"
+	loaded s9p_dp || modprobe s9p-dp $(cat /etc/s9p-dp.conf 2>/dev/null) || exit 1
+	loaded s9p_dpaudio || modprobe s9p-dpaudio || echo "warning: s9p-dpaudio not loaded (no HDMI audio)"
+	;;
+status)
+	echo "== USB-C (s9p-usbc)"; cat $DBG/s9p-usbc/state 2>/dev/null
+	echo "== DP"; cat $DBG/s9p-dp/state 2>/dev/null
+	echo "== registers"; cat $DBG/s9p-dp/regs 2>/dev/null
+	echo "== DRM"; for c in /sys/class/drm/card*-*; do echo "$c: $(cat "$c/status" 2>/dev/null)"; done
+	echo "== USB-C log (last)"; tail -25 $DBG/s9p-usbc/log 2>/dev/null
+	echo "== DP log (last)"; tail -40 $DBG/s9p-dp/log 2>/dev/null
+	;;
+bist)    echo "bist ${2:-16}" > $DBG/s9p-dp/cmd; tail -30 $DBG/s9p-dp/log ;;
+pattern) echo "pattern ${2:-16}" > $DBG/s9p-dp/cmd; tail -30 $DBG/s9p-dp/log ;;
+cmd)     echo "$2" > $DBG/s9p-dp/cmd; tail -30 $DBG/s9p-dp/log ;;
+logs)
+	o=./logs-dp-$(date +%Y%m%d-%H%M%S); mkdir -p "$o"
+	for f in log state opcode; do cat $DBG/s9p-usbc/$f > "$o/usbc-$f.txt" 2>/dev/null; done
+	for f in log state regs; do cat $DBG/s9p-dp/$f > "$o/dp-$f.txt" 2>/dev/null; done
+	dmesg > "$o/dmesg.txt"; cat $DBG/dri/*/state > "$o/drm-state.txt" 2>/dev/null
+	echo "saved to $o"
+	;;
+unload)
+	loaded s9p_dpaudio && rmmod s9p_dpaudio
+	if loaded s9p_dp; then
+		rmmod s9p_dp || { echo "s9p_dp is in use (GNOME has it open): reboot to remove it"; exit 1; }
+	fi
+	loaded s9p_usbhost && { rmmod s9p_usbhost || echo "warning: s9p_usbhost stays"; }
+	loaded s9p_usbc && { rmmod s9p_usbc || { echo "cannot remove s9p_usbc"; exit 1; }; }
+	dev=$(ls /sys/bus/i2c/devices/ | grep -E '^[0-9]+-0025$' | head -1)
+	if [ -n "$dev" ] && [ ! -e "/sys/bus/i2c/devices/$dev/driver" ]; then
+		echo "$dev" > /sys/bus/i2c/drivers/s9p-max77705-muic/bind || echo "warning: MUIC not bound again (reboot)"
+	fi
+	echo "modules removed"
+	;;
+*) sed -n 2,11p "$0" ;;
+esac

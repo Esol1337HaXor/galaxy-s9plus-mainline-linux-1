@@ -1,0 +1,2 @@
+alsa-ucm-conf   # profiles of the card (Speaker, Headphones)
+alsa-utils

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Remove the modules; the shared ALSA/HID ones only if no other extra uses them.
+K=$(uname -r)
+systemctl disable s9p-panel-off.service 2>/dev/null || true
+s9p-dp unload || echo "reboot to finish removing the modules"
+rm -rf "/lib/modules/$K/extra/s9p-usbc-dp" /var/lib/s9p-extras/usb-c-display
+ls /var/lib/s9p-extras/* >/dev/null 2>&1 || rm -rf "/lib/modules/$K/extra/s9p-common"
+depmod -a "$K"

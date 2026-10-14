@@ -1,0 +1,12 @@
+[Unit]
+Description=Galaxy S9+ internal audio (ABOX, CS47L93, MAX98512)
+After=systemd-modules-load.service
+Before=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/s9p-audio/load
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target graphical.target

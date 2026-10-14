@@ -1,0 +1,11 @@
+[Unit]
+Description=Galaxy S9+ USB-C DisplayPort output and USB host
+After=gdm.service NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/s9p-usbc-dp/boot-load
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target graphical.target

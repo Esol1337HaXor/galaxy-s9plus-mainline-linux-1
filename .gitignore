@@ -6,3 +6,11 @@
 *.img
 __pycache__/
 *.pyc
+# macOS
+.DS_Store
+# out-of-tree module builds (scripts/build/build_extras.sh)
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Remove the modules; the shared ALSA/HID ones only if no other extra uses them.
+# The firmware copied to /lib/firmware stays (it is the phone's own).
+K=$(uname -r)
+rm -rf "/lib/modules/$K/extra/s9p-audio" /var/lib/s9p-extras/audio
+ls /var/lib/s9p-extras/* >/dev/null 2>&1 || rm -rf "/lib/modules/$K/extra/s9p-common"
+depmod -a "$K"
+echo "reboot to unload ABOX"

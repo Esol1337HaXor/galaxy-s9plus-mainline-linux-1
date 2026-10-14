@@ -1,0 +1,31 @@
+#!/bin/sh
+# Install the modules built by scripts/build/build_extras.sh and the ABOX
+# firmware from the phone's own Android VENDOR partition, then load them.
+set -eu
+D=$(cd "$(dirname "$0")" && pwd)
+K=$(uname -r)
+SRC=$D/../../dist/extras/$K
+[ -f "$SRC/SHA256SUMS" ] || { echo "no modules for kernel $K in dist/extras: run scripts/build/build_extras.sh" >&2; exit 1; }
+(cd "$SRC" && sha256sum -c --quiet SHA256SUMS) || { echo "dist/extras/$K: checksum mismatch" >&2; exit 1; }
+M=/lib/modules/$K/extra
+install -d "$M/s9p-audio" "$M/s9p-common"
+install -m644 "$SRC"/sound/*.ko "$SRC"/madera/*.ko "$M/s9p-audio/"
+install -m644 "$SRC"/hid/*.ko "$SRC"/alsa/*.ko "$M/s9p-common/"
+mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/audio
+depmod -a "$K"
+
+# Samsung's firmware is not redistributable: take it from this phone
+if [ ! -e /lib/firmware/calliope_dram.bin ]; then
+	V=/dev/disk/by-partlabel/VENDOR
+	[ -e "$V" ] || { echo "no VENDOR partition: copy calliope_*.bin to /lib/firmware by hand" >&2; exit 1; }
+	T=$(mktemp -d)
+	mount -o ro "$V" "$T"
+	cp "$T"/firmware/calliope_sram.bin "$T"/firmware/calliope_dram.bin "$T"/firmware/calliope_iva.bin /lib/firmware/
+	for f in dsm.bin dsm_tune.bin AP_AUDIO_SLSI.bin APBargeIn_AUDIO_SLSI.bin APBiBF_AUDIO_SLSI.bin \
+		 APDV_AUDIO_SLSI.bin SoundBoosterParam.bin; do
+		[ ! -e "$T/firmware/$f" ] || cp "$T/firmware/$f" /lib/firmware/
+	done
+	umount "$T"; rmdir "$T"
+	echo "ABOX firmware copied from the VENDOR partition"
+fi
+echo "ABOX boots once per phone boot: reboot to start the audio"

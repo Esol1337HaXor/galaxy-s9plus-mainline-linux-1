@@ -247,3 +247,21 @@ See [05-performance.md](05-performance.md).
 The GPU's OPP table lives **inside** the `gpu` node, not as a sibling.
 `fw_devlink` treats `operating-points-v2` as a supplier link, and with the
 table as a sibling panfrost's probe was delayed to 14.3 s.
+
+## Out-of-tree modules -- src/usbc-dp/, src/sound/
+
+Not installed into the tree: `scripts/build/build_extras.sh` builds them
+against the finished stable kernel, together with ALSA, ASoC, HID and the
+Cirrus madera drivers as modules, for the optional `extras/usb-c-display` and
+`extras/audio`.
+
+| src/... | does | documented in |
+|---|---|---|
+| `usbc-dp/s9p-usbc.c` | MAX77705 Type-C/PD: DisplayPort alt mode, VBUS, data role | [08-usb-c-display.md](08-usb-c-display.md) |
+| `usbc-dp/s9p-usbhost.c` | DWC3 as dual-role, host on hubs and docks | [08-usb-c-display.md](08-usb-c-display.md) |
+| `usbc-dp/s9p-dp-*.c` | DP PHY, controller, link training, DECON2, DRM device | [08-usb-c-display.md](08-usb-c-display.md) |
+| `usbc-dp/s9p-dpaudio.c` | HDMI audio: PL330 into the DP audio FIFO | [08-usb-c-display.md](08-usb-c-display.md) |
+| `sound/s9p-audio-board.c` | codec SPI and amplifier I2C buses, codec power | [09-audio.md](09-audio.md) |
+| `sound/s9p-abox.c` | ABOX DSP: SysMMU, stock firmware boot, IPC | [09-audio.md](09-audio.md) |
+| `sound/s9p-abox-pcm.c` | the ASoC card: speaker and headphone PCMs | [09-audio.md](09-audio.md) |
+| `sound/s9p-max98512.c` | the MAX98512 amplifiers | [09-audio.md](09-audio.md) |

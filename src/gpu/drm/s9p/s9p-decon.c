@@ -266,7 +266,14 @@ static void s9p_decon_program_address(struct s9p_decon *priv, dma_addr_t addr)
 	writel_relaxed((u32)addr, ch + IDMA_IN_BASE_ADDR_Y);
 	writel_relaxed((u32)addr, ch + IDMA_IN_BASE_ADDR_Y + 4);
 	wmb();
-	writel_relaxed(s9p_shadow_mask(priv),
+	/*
+	 * Read-modify-write, as the vendor's decon_reg_update_req_window():
+	 * the global request DECON2's DisplayPort setup leaves pending in
+	 * this register (DP_CONNECTION_CONTROL lives in DECON0's globally
+	 * shadowed range) must survive until the next TE latches it.
+	 */
+	writel_relaxed(readl_relaxed(priv->decon + DECON_SHADOW_REG_UPDATE_REQ) |
+		       s9p_shadow_mask(priv),
 		       priv->decon + DECON_SHADOW_REG_UPDATE_REQ);
 	s9p_hw_trigger_unmask(priv);
 }

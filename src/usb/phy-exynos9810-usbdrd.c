@@ -24,6 +24,7 @@
  * 0x110a0000 stays powered down (PMA_LOW_PWRN), exactly as the vendor does
  * before the USB3 PHY instance is enabled.
  */
+#include <linux/atomic.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -130,6 +131,7 @@ struct s9p_usbphy {
 	struct regmap *pmu;
 	struct clk_bulk_data clks[2];
 	int nclks;
+	bool clks_kept;		/* exit left them on for DP */
 	struct phy *phy;
 };
 
@@ -170,9 +172,33 @@ static void s9p_usbphy_dump(struct s9p_usbphy *p, const char *when)
 		 buf);
 }
 
+/*
+ * The DisplayPort driver (s9p-dp) drives the DP half of the same combo PHY.
+ * While it holds the PHY, USB must not power down the PMA (PMA_LOW_PWRN),
+ * isolate the PHY in the PMU or stop its clocks: the vendor's
+ * dwc3_otg_phy_enable() keeps an owner mask for exactly this.
+ */
+static atomic_t s9p_usbdp_dp_users = ATOMIC_INIT(0);
+
+void s9p_usbdp_dp_hold(bool hold)
+{
+	if (hold)
+		atomic_inc(&s9p_usbdp_dp_users);
+	else if (atomic_dec_if_positive(&s9p_usbdp_dp_users) < 0)
+		pr_warn("s9p-usbphy: unbalanced DP release\n");
+}
+EXPORT_SYMBOL_GPL(s9p_usbdp_dp_hold);
+
+static bool s9p_usbdp_dp_held(void)
+{
+	return atomic_read(&s9p_usbdp_dp_users) > 0;
+}
+
 static void s9p_usbphy_pmu(struct s9p_usbphy *p, bool on)
 {
 	if (!p->pmu)
+		return;
+	if (!on && s9p_usbdp_dp_held())
 		return;
 	regmap_update_bits(p->pmu, PMU_USB20_PHY_CTRL, PMU_PHY_ENABLE,
 			   on ? PMU_PHY_ENABLE : 0);
@@ -224,9 +250,12 @@ static int s9p_usbphy_init(struct phy *phy)
 	void __iomem *r = p->regs;
 	int ret;
 
-	ret = clk_bulk_prepare_enable(p->nclks, p->clks);
-	if (ret)
-		return ret;
+	if (!p->clks_kept) {
+		ret = clk_bulk_prepare_enable(p->nclks, p->clks);
+		if (ret)
+			return ret;
+	}
+	p->clks_kept = false;
 
 	s9p_usbphy_dump(p, "before init");
 
@@ -245,8 +274,13 @@ static int s9p_usbphy_init(struct phy *phy)
 	udelay(10);
 	rmw(r + USBCON_CLKRST, CLKRST_LINK_SW_RST, 0);
 
-	/* PHY reset high */
-	rmw(r + USBCON_CLKRST, 0, CLKRST_PHY_SW_RST | CLKRST_PHY_RST_SEL);
+	/*
+	 * PHY reset high. Not while DP holds the combo PHY: this reset reaches
+	 * the PMA too (vendor order: phy_sw_rst before usbdp_enable), and the
+	 * vendor never re-inits USB with DP as an owner (dwc3_otg_phy_enable).
+	 */
+	if (!s9p_usbdp_dp_held())
+		rmw(r + USBCON_CLKRST, 0, CLKRST_PHY_SW_RST | CLKRST_PHY_RST_SEL);
 
 	/* PHY power: SIDDQ off */
 	rmw(r + USBCON_HSP_TEST, HSP_TEST_SIDDQ, 0);
@@ -261,8 +295,9 @@ static int s9p_usbphy_init(struct phy *phy)
 	udelay(100);
 
 	/* PHY reset low */
-	rmw(r + USBCON_CLKRST, CLKRST_PHY_SW_RST | CLKRST_PORT_RST,
-	    CLKRST_PHY_RST_SEL);
+	if (!s9p_usbdp_dp_held())
+		rmw(r + USBCON_CLKRST, CLKRST_PHY_SW_RST | CLKRST_PORT_RST,
+		    CLKRST_PHY_RST_SEL);
 
 	/* no VBUS pad on this board: force VBUS valid, bypass the bus filter */
 	rmw(r + USBCON_LINK_CTRL, 0, LINKCTRL_BUS_FILTER_BYPASS_MASK);
@@ -279,7 +314,8 @@ static int s9p_usbphy_init(struct phy *phy)
 	/* --- phy_exynos_usb_v3p1_pipe_ovrd(): USB3 side forced idle --- */
 	rmw(r + USBCON_LINK_CTRL, LINKCTRL_PIPE3_FORCE_PHY_STATUS,
 	    LINKCTRL_PIPE3_FORCE_EN | LINKCTRL_PIPE3_FORCE_RX_ELEC_IDLE);
-	rmw(r + USBCON_COMBO_PMA_CTRL, 0, PMA_LOW_PWRN);
+	if (!s9p_usbdp_dp_held())
+		rmw(r + USBCON_COMBO_PMA_CTRL, 0, PMA_LOW_PWRN);
 
 	/* --- phy_exynos_usb_v3p1_tune(), device-mode values --- */
 	if (s9p_phy_tune)
@@ -299,7 +335,10 @@ static int s9p_usbphy_exit(struct phy *phy)
 	rmw(r + USBCON_HSP_TEST, 0, HSP_TEST_SIDDQ);
 	s9p_usbphy_q_ch(p, false);
 
-	clk_bulk_disable_unprepare(p->nclks, p->clks);
+	if (s9p_usbdp_dp_held())
+		p->clks_kept = true;	/* DP still needs the combo PHY clocks */
+	else
+		clk_bulk_disable_unprepare(p->nclks, p->clks);
 	return 0;
 }
 
