@@ -10,7 +10,7 @@ SRC=$D/../../dist/extras/$K
 M=/lib/modules/$K/extra
 install -d "$M/s9p-audio" "$M/s9p-common"
 install -m644 "$SRC"/sound/*.ko "$SRC"/madera/*.ko "$M/s9p-audio/"
-install -m644 "$SRC"/hid/*.ko "$SRC"/alsa/*.ko "$M/s9p-common/"
+install -m644 "$SRC"/kernel/*.ko "$SRC"/hid/*.ko "$SRC"/alsa/*.ko "$M/s9p-common/"
 mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/audio
 depmod -a "$K"
 

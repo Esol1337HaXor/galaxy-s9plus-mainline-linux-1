@@ -1,0 +1,15 @@
+[Unit]
+Description=Galaxy S9+ notification LED (MAX77705 RGB)
+After=systemd-modules-load.service
+# skipped until extras/install.sh has put the modules in place
+ConditionPathIsDirectory=/lib/modules/%v/extra/s9p-leds
+
+[Service]
+Type=oneshot
+# the node first, then the driver that binds to it
+ExecStart=/sbin/modprobe s9p-leds
+ExecStart=/sbin/modprobe leds-max77705
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

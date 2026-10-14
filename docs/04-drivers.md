@@ -248,12 +248,12 @@ The GPU's OPP table lives **inside** the `gpu` node, not as a sibling.
 `fw_devlink` treats `operating-points-v2` as a supplier link, and with the
 table as a sibling panfrost's probe was delayed to 14.3 s.
 
-## Out-of-tree modules -- src/usbc-dp/, src/sound/
+## Out-of-tree modules -- src/usbc-dp/, src/sound/, src/leds/
 
 Not installed into the tree: `scripts/build/build_extras.sh` builds them
 against the finished stable kernel, together with ALSA, ASoC, HID and the
-Cirrus madera drivers as modules, for the optional `extras/usb-c-display` and
-`extras/audio`.
+Cirrus madera drivers as modules, for the optional `extras/usb-c-display`,
+`extras/audio` and `extras/notification-led`.
 
 | src/... | does | documented in |
 |---|---|---|
@@ -265,3 +265,4 @@ Cirrus madera drivers as modules, for the optional `extras/usb-c-display` and
 | `sound/s9p-abox.c` | ABOX DSP: SysMMU, stock firmware boot, IPC | [09-audio.md](09-audio.md) |
 | `sound/s9p-abox-pcm.c` | the ASoC card: speaker and headphone PCMs | [09-audio.md](09-audio.md) |
 | `sound/s9p-max98512.c` | the MAX98512 amplifiers | [09-audio.md](09-audio.md) |
+| `leds/s9p-leds.c`, `leds/leds-max77705.c` | the RGB LED node, upstream LED driver with a current ceiling | [10-notification-led.md](10-notification-led.md) |

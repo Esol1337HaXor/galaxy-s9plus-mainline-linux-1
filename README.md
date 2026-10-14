@@ -33,6 +33,7 @@ to use the phone as a small desktop computer, even one with a broken screen.
 | USB device mode | ✅ | Serial console and network to a PC over one cable |
 | Battery telemetry | ✅ | Charge, voltage and current |
 | Charging | ✅ | MAX77705; charging can be paused from userspace |
+| Notification LED | ✅ | RGB, orange while charging and green when full; any LED trigger |
 | CPU and GPU scaling | ✅ | Both CPU clusters and the GPU follow the load, thermally capped |
 | Watchdog | ✅ | A hang reboots into TWRP instead of a dead phone |
 | Warm reboot | 🟡 | About every second warm reboot hangs early; the watchdog recovers it |
@@ -128,6 +129,7 @@ the extras) to the phone and install what you want there:
 sudo extras/install.sh                    # list them
 sudo extras/install.sh usb-c-display      # external monitor, USB host, HDMI audio
 sudo extras/install.sh audio              # speaker and headphones (reboot after)
+sudo extras/install.sh notification-led   # RGB LED: orange charging, green full
 sudo extras/install.sh power-profiles     # --remove takes any of them out again
 ```
 
@@ -135,6 +137,7 @@ sudo extras/install.sh power-profiles     # --remove takes any of them out again
 |---|---|
 | [usb-c-display](extras/usb-c-display/) | External monitor over USB-C, USB host on the adapter's hub, HDMI audio. Broken screen? `sudo systemctl enable s9p-panel-off` makes the monitor the only display |
 | [audio](extras/audio/) | Built-in speaker and headphone jack; copies Samsung's DSP firmware from the phone's own `VENDOR` partition |
+| [notification-led](extras/notification-led/) | The RGB notification LED, following the battery by default; any LED trigger |
 | [power-profiles](extras/power-profiles/) | CPU/GPU ceilings and Wi-Fi power save as three profiles, following GNOME's power mode |
 | [flight-recorder](extras/flight-recorder/) | Every kernel message and a state line per minute, fsync'ed, for hunting hangs |
 | [usb-apt-proxy](extras/usb-apt-proxy/) | apt through a proxy on the PC the phone is cabled to |

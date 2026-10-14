@@ -18,4 +18,5 @@ sudo extras/install.sh power-profiles --remove
 | [usb-apt-proxy](usb-apt-proxy/) | lets `apt` reach the internet through a proxy on the PC the phone is cabled to |
 | [usb-c-display](usb-c-display/) | external monitor over USB-C (DisplayPort to HDMI), USB host on the adapter's hub, HDMI audio. Needs `scripts/build/build_extras.sh` |
 | [audio](audio/) | built-in speaker and headphone jack through the ABOX DSP (stock firmware copied from the phone). Needs `scripts/build/build_extras.sh` |
+| [notification-led](notification-led/) | the RGB notification LED: orange while charging, green when full; any LED trigger. Needs `scripts/build/build_extras.sh` |
 | [debug-tools](debug-tools/) | register, PMIC and clock tools used to bring the port up; test-run reboot helper; the old userspace governor |

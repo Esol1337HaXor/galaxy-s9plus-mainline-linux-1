@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build the optional USB-C display and audio modules (extras/usb-c-display,
-# extras/audio) for the kernel that build_stable.sh produced.
+# Build the optional modules of extras/usb-c-display, extras/audio and
+# extras/notification-led for the kernel that build_stable.sh produced.
 #
 #   sudo scripts/build/build_extras.sh          -> dist/extras/<kernel release>/
 #
@@ -25,6 +25,12 @@ echo "=== kernel $KREL ==="
 # SND_SOC_CS47L92 has no prompt upstream (only machine drivers select it)
 sed -i '/^config SND_SOC_CS47L92$/{n;s/^\ttristate$/\ttristate "Cirrus Logic CS47L92\/93 (s9p)"/}' \
 	sound/soc/codecs/Kconfig
+
+# All =m modules of the stable configuration: their symbols must be in
+# out/Module.symvers before anything is built against it, and a few of them
+# (DP helpers, CEC, multicolor LEDs, force feedback) are installed with the extras.
+echo "=== modules of the stable kernel ==="
+$K O=out modules
 
 echo "=== extras configuration (out-extras) ==="
 mkdir -p out-extras
@@ -68,9 +74,6 @@ $K O=out-extras M="$WORK/sound" KBUILD_MODPOST_WARN=1 modules >/dev/null 2>&1 ||
 $K O=out-extras M="$M" KBUILD_EXTRA_SYMBOLS="$WORK/sound/Module.symvers" modules
 $K O=out-extras M="$WORK/sound" KBUILD_EXTRA_SYMBOLS="$M/Module.symvers" modules
 
-echo "=== kernel modules the DisplayPort driver needs (=m in the stable config) ==="
-$K O=out drivers/gpu/drm/display/drm_display_helper.ko drivers/media/cec/core/cec.ko
-
 echo "=== this port's modules ==="
 for d in usbc-dp sound; do
 	rm -rf "$WORK/$d-src"; cp -r "$PROJ/src/$d" "$WORK/$d-src"
@@ -80,14 +83,21 @@ for d in usbc-dp sound; do
 		KBUILD_EXTRA_SYMBOLS="$WORK/sound/Module.symvers $WORK/$d-base.symvers" modules
 done
 
+echo "=== notification LED (src/leds) ==="
+rm -rf "$WORK/leds-src"; cp -r "$PROJ/src/leds" "$WORK/leds-src"
+$K O=out-extras M="$WORK/leds-src" modules
+
 OUT="$PROJ/dist/extras/$KREL"
-rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera}
-cp out/drivers/gpu/drm/display/drm_display_helper.ko out/drivers/media/cec/core/cec.ko "$OUT/kernel/"
+rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds}
+# =m in the stable kernel, needed by the extras (the image installs no modules)
+cp out/drivers/gpu/drm/display/drm_display_helper.ko out/drivers/media/cec/core/cec.ko \
+   out/drivers/leds/led-class-multicolor.ko out/drivers/input/ff-memless.ko "$OUT/kernel/"
 cp "$WORK"/usbc-dp-src/*.ko "$OUT/usbc-dp/"
 cp "$WORK"/sound-src/*.ko "$OUT/sound/"
 find "$WORK/hid" -name '*.ko' -exec cp {} "$OUT/hid/" \;
 find "$WORK/sound" -name '*.ko' -exec cp {} "$OUT/alsa/" \;
 find "$M" -name '*.ko' -exec cp {} "$OUT/madera/" \;
+cp "$WORK"/leds-src/*.ko "$OUT/leds/"
 "${CROSS_COMPILE}strip" --strip-debug "$OUT"/*/*.ko
 (cd "$OUT" && sha256sum */*.ko > SHA256SUMS)
 echo "=== done: $(ls "$OUT"/*/*.ko | wc -l) modules in dist/extras/$KREL ==="

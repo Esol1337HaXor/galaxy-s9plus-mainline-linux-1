@@ -1,0 +1,15 @@
+#!/bin/sh
+# Install the modules built by scripts/build/build_extras.sh, then load them.
+set -eu
+D=$(cd "$(dirname "$0")" && pwd)
+K=$(uname -r)
+SRC=$D/../../dist/extras/$K
+[ -f "$SRC/SHA256SUMS" ] || { echo "no modules for kernel $K in dist/extras: run scripts/build/build_extras.sh" >&2; exit 1; }
+(cd "$SRC" && sha256sum -c --quiet SHA256SUMS) || { echo "dist/extras/$K: checksum mismatch" >&2; exit 1; }
+M=/lib/modules/$K/extra
+install -d "$M/s9p-leds" "$M/s9p-common"
+install -m644 "$SRC"/leds/*.ko "$M/s9p-leds/"
+install -m644 "$SRC"/kernel/*.ko "$M/s9p-common/"
+mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/notification-led
+depmod -a "$K"
+systemctl restart s9p-led.service
