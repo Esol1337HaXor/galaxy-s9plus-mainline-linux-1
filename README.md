@@ -33,6 +33,7 @@ to use the phone as a small desktop computer, even one with a broken screen.
 | USB device mode | ✅ | Serial console and network to a PC over one cable |
 | Battery telemetry | ✅ | Charge, voltage and current |
 | Charging | ✅ | MAX77705; charging can be paused from userspace |
+| Vibration | ✅ | Force-feedback input device, used by feedbackd |
 | Notification LED | ✅ | RGB, orange while charging and green when full; any LED trigger |
 | CPU and GPU scaling | ✅ | Both CPU clusters and the GPU follow the load, thermally capped |
 | Watchdog | ✅ | A hang reboots into TWRP instead of a dead phone |
@@ -131,6 +132,7 @@ sudo extras/install.sh usb-c-display      # external monitor, USB host, HDMI aud
 sudo extras/install.sh audio              # speaker and headphones (reboot after)
 sudo extras/install.sh notification-led   # RGB LED: orange charging, green full
 sudo extras/install.sh bluetooth          # Bluetooth (needs usb-c-display)
+sudo extras/install.sh vibration          # vibration motor + feedbackd
 sudo extras/install.sh power-profiles     # --remove takes any of them out again
 ```
 
@@ -140,6 +142,7 @@ sudo extras/install.sh power-profiles     # --remove takes any of them out again
 | [audio](extras/audio/) | Built-in speaker and headphone jack; copies Samsung's DSP firmware from the phone's own `VENDOR` partition |
 | [notification-led](extras/notification-led/) | The RGB notification LED, following the battery by default; any LED trigger |
 | [bluetooth](extras/bluetooth/) | Bluetooth; patchram from the phone's `VENDOR` partition, address from `EFS`. Needs usb-c-display |
+| [vibration](extras/vibration/) | The vibration motor as a force-feedback device, with feedbackd set up to use it |
 | [power-profiles](extras/power-profiles/) | CPU/GPU ceilings and Wi-Fi power save as three profiles, following GNOME's power mode |
 | [flight-recorder](extras/flight-recorder/) | Every kernel message and a state line per minute, fsync'ed, for hunting hangs |
 | [usb-apt-proxy](extras/usb-apt-proxy/) | apt through a proxy on the PC the phone is cabled to |

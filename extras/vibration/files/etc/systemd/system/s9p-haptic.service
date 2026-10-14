@@ -1,0 +1,15 @@
+[Unit]
+Description=Galaxy S9+ vibration motor (MAX77705 haptic)
+After=systemd-modules-load.service
+# skipped until extras/install.sh has put the modules in place
+ConditionPathIsDirectory=/lib/modules/%v/extra/s9p-haptic
+
+[Service]
+Type=oneshot
+# the PWM and haptic nodes first, then the driver that binds to them
+ExecStart=/sbin/modprobe s9p-haptic
+ExecStart=/sbin/modprobe max77693-haptic
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

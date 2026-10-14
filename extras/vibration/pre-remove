@@ -1,0 +1,7 @@
+#!/bin/sh
+# Remove the modules; the shared ones only if no other extra uses them.
+K=$(uname -r)
+modprobe -r max77693-haptic s9p-haptic 2>/dev/null || true
+rm -rf "/lib/modules/$K/extra/s9p-haptic" /var/lib/s9p-extras/vibration
+ls /var/lib/s9p-extras/* >/dev/null 2>&1 || rm -rf "/lib/modules/$K/extra/s9p-common"
+depmod -a "$K"

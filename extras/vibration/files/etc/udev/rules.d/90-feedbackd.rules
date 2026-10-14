@@ -1,0 +1,8 @@
+# Galaxy S9+ (extras/vibration): replaces the feedbackd rules of the package.
+# The MAX77705 motor is the vibrator. The notification LED keeps its own
+# trigger: the package's rule would hand any "*:status" LED to feedbackd,
+# which switches it to a pattern trigger.
+ACTION=="remove", GOTO="feedbackd_end"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT}=="1", ENV{ID_PATH}=="platform-vibrator", TAG+="uaccess", ENV{FEEDBACKD_TYPE}="vibra"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="max77693-haptic", TAG+="uaccess", ENV{FEEDBACKD_TYPE}="vibra"
+LABEL="feedbackd_end"

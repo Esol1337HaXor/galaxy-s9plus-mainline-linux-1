@@ -20,4 +20,5 @@ sudo extras/install.sh power-profiles --remove
 | [audio](audio/) | built-in speaker and headphone jack through the ABOX DSP (stock firmware copied from the phone). Needs `scripts/build/build_extras.sh` |
 | [notification-led](notification-led/) | the RGB notification LED: orange while charging, green when full; any LED trigger. Needs `scripts/build/build_extras.sh` |
 | [bluetooth](bluetooth/) | Bluetooth (BCM4361 over UART); needs usb-c-display. Needs `scripts/build/build_extras.sh` |
+| [vibration](vibration/) | the vibration motor (force feedback) and feedbackd. Needs `scripts/build/build_extras.sh` |
 | [debug-tools](debug-tools/) | register, PMIC and clock tools used to bring the port up; test-run reboot helper; the old userspace governor |

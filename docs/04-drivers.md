@@ -248,12 +248,12 @@ The GPU's OPP table lives **inside** the `gpu` node, not as a sibling.
 `fw_devlink` treats `operating-points-v2` as a supplier link, and with the
 table as a sibling panfrost's probe was delayed to 14.3 s.
 
-## Out-of-tree modules -- src/usbc-dp/, src/sound/, src/leds/, src/bluetooth/
+## Out-of-tree modules -- src/usbc-dp/, src/sound/, src/leds/, src/bluetooth/, src/haptic/
 
 Not installed into the tree: `scripts/build/build_extras.sh` builds them
 against the finished stable kernel, together with ALSA, ASoC, HID and the
 Cirrus madera drivers as modules, for the optional `extras/usb-c-display`,
-`extras/audio`, `extras/notification-led` and `extras/bluetooth`.
+`extras/audio`, `extras/notification-led`, `extras/bluetooth` and `extras/vibration`.
 
 | src/... | does | documented in |
 |---|---|---|
@@ -267,3 +267,4 @@ Cirrus madera drivers as modules, for the optional `extras/usb-c-display`,
 | `sound/s9p-max98512.c` | the MAX98512 amplifiers | [09-audio.md](09-audio.md) |
 | `leds/s9p-leds.c`, `leds/leds-max77705.c` | the RGB LED node, upstream LED driver with a current ceiling | [10-notification-led.md](10-notification-led.md) |
 | `bluetooth/s9p-bt-board.c`, `bluetooth/btbcm-bcm4361.patch` | the Bluetooth UART and its serdev child; btbcm fixes for the BCM4361B2 | [11-bluetooth.md](11-bluetooth.md) |
+| `haptic/s9p-haptic.c`, `haptic/max77693-haptic.c` | the PWM block and haptic node; upstream haptic driver with limits | [12-vibration.md](12-vibration.md) |
