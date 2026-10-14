@@ -13,5 +13,5 @@ install -m644 "$SRC"/kernel/*.ko "$M/s9p-common/"
 mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/vibration
 depmod -a "$K"
 udevadm control --reload
-systemctl restart s9p-haptic.service
+[ -n "${NO_START:-}" ] || systemctl restart s9p-haptic.service
 udevadm trigger -s input -c add && udevadm settle

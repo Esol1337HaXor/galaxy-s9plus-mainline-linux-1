@@ -13,5 +13,5 @@ install -m644 "$SRC"/usbc-dp/*.ko "$M/s9p-usbc-dp/"
 install -m644 "$SRC"/kernel/*.ko "$SRC"/hid/*.ko "$SRC"/alsa/*.ko "$M/s9p-common/"
 mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/usb-c-display
 depmod -a "$K"
-systemctl restart s9p-usbc-dp.service
+[ -n "${NO_START:-}" ] || systemctl restart s9p-usbc-dp.service
 echo "broken internal screen? sudo systemctl enable s9p-panel-off (external monitor only)"

@@ -12,4 +12,4 @@ install -m644 "$SRC"/leds/*.ko "$M/s9p-leds/"
 install -m644 "$SRC"/kernel/*.ko "$M/s9p-common/"
 mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/notification-led
 depmod -a "$K"
-systemctl restart s9p-led.service
+[ -n "${NO_START:-}" ] || systemctl restart s9p-led.service

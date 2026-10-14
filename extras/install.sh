@@ -5,6 +5,9 @@
 #   sudo extras/install.sh                     list the features
 #   sudo extras/install.sh <feature>           install it
 #   sudo extras/install.sh <feature> --remove  remove it again
+#   sudo NO_START=1 extras/install.sh <feature> install and enable, start at the
+#                                              next boot (before a reboot, or
+#                                              when changing the kernel)
 #
 # A feature is a directory with files/ (copied to /), and optionally
 # `packages` (installed with apt), `units` (systemd units enabled),
@@ -43,6 +46,10 @@ pkgs=${pkgs# }; pkgs=${pkgs% }
 	tar -C / --no-overwrite-dir --keep-directory-symlink -xpf -
 systemctl daemon-reload
 [ ! -d "$D/files/etc/sysctl.d" ] || sysctl --system >/dev/null
-[ -z "$units" ] || systemctl enable --now $units
-[ ! -f "$D/post-install" ] || sh "$D/post-install"
+if [ -n "${NO_START:-}" ]; then
+	[ -z "$units" ] || systemctl enable $units
+else
+	[ -z "$units" ] || systemctl enable --now $units
+fi
+[ ! -f "$D/post-install" ] || NO_START=${NO_START:-} sh "$D/post-install"
 echo "$F installed (remove with: sudo extras/install.sh $F --remove)"

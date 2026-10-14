@@ -51,4 +51,4 @@ if [ ! -s "$C" ]; then
 	fi
 	rm -f "$T"
 fi
-systemctl restart s9p-bt.service
+[ -n "${NO_START:-}" ] || systemctl restart s9p-bt.service
