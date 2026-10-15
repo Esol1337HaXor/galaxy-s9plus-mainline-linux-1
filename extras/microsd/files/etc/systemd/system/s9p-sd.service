@@ -1,0 +1,14 @@
+[Unit]
+Description=Galaxy S9+ microSD slot (DWMMC2)
+After=systemd-modules-load.service
+# skipped until extras/install.sh has put the modules in place
+ConditionPathIsDirectory=/lib/modules/%v/extra/s9p-sd
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/modprobe exfat
+ExecStart=/sbin/modprobe s9p-sd-board
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

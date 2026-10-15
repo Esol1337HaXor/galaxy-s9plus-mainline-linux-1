@@ -1,0 +1,14 @@
+#!/bin/sh
+# Install the modules built by scripts/build/build_extras.sh, then load them.
+set -eu
+D=$(cd "$(dirname "$0")" && pwd)
+K=$(uname -r)
+SRC=$D/../../dist/extras/$K
+[ -f "$SRC/SHA256SUMS" ] || { echo "no modules for kernel $K in dist/extras: run scripts/build/build_extras.sh" >&2; exit 1; }
+(cd "$SRC" && sha256sum -c --quiet SHA256SUMS) || { echo "dist/extras/$K: checksum mismatch" >&2; exit 1; }
+M=/lib/modules/$K/extra
+install -d "$M/s9p-sd"
+install -m644 "$SRC"/sdcard/*.ko "$M/s9p-sd/"
+mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/microsd
+depmod -a "$K"
+[ -n "${NO_START:-}" ] || systemctl restart s9p-sd.service

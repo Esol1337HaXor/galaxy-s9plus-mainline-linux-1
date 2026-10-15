@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build the optional modules of extras/usb-c-display, extras/audio,
-# extras/notification-led, extras/bluetooth and extras/vibration for the kernel that
+# extras/notification-led, extras/bluetooth, extras/vibration and extras/microsd
+# for the kernel that
 # build_stable.sh produced.
 #
 #   sudo scripts/build/build_extras.sh          -> dist/extras/<kernel release>/
@@ -92,14 +93,19 @@ for d in usbc-dp sound bluetooth; do
 		KBUILD_EXTRA_SYMBOLS="$WORK/sound/Module.symvers $WORK/$d-base.symvers" modules
 done
 
-for d in leds haptic; do
+echo "=== exFAT (microSD cards above 32 GB) ==="
+rm -rf "$WORK/exfat"; cp -r fs/exfat "$WORK/exfat"
+echo 'ccflags-y += -DCONFIG_EXFAT_DEFAULT_IOCHARSET=\"utf8\"' >> "$WORK/exfat/Makefile"
+$K O=out M="$WORK/exfat" CONFIG_EXFAT_FS=m modules
+
+for d in leds haptic sdcard; do
 	echo "=== src/$d ==="
 	rm -rf "$WORK/$d-src"; cp -r "$PROJ/src/$d" "$WORK/$d-src"
 	$K O=out-extras M="$WORK/$d-src" modules
 done
 
 OUT="$PROJ/dist/extras/$KREL"
-rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds,bluetooth,haptic}
+rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds,bluetooth,haptic,sdcard}
 # =m in the stable kernel, needed by the extras (the image installs no modules)
 cp out/drivers/gpu/drm/display/drm_display_helper.ko out/drivers/media/cec/core/cec.ko \
    out/drivers/leds/led-class-multicolor.ko out/drivers/input/ff-memless.ko \
@@ -112,9 +118,10 @@ find "$WORK/sound" -name '*.ko' -exec cp {} "$OUT/alsa/" \;
 find "$M" -name '*.ko' -exec cp {} "$OUT/madera/" \;
 cp "$WORK"/leds-src/*.ko "$OUT/leds/"
 cp "$WORK"/haptic-src/*.ko "$OUT/haptic/"
+cp "$WORK"/sdcard-src/*.ko "$WORK"/exfat/exfat.ko "$OUT/sdcard/"
 cp "$WORK"/bluetooth-src/*.ko "$OUT/bluetooth/"
 find "$WORK/bt-net" "$WORK/bt-drv" -name '*.ko' -exec cp {} "$OUT/bluetooth/" \;
 "${CROSS_COMPILE}strip" --strip-debug "$OUT"/*/*.ko
 (cd "$OUT" && sha256sum */*.ko > SHA256SUMS)
 echo "=== done: $(ls "$OUT"/*/*.ko | wc -l) modules in dist/extras/$KREL ==="
-echo "copy the repository (with dist/) to the phone, then: sudo extras/install.sh usb-c-display / audio / notification-led / bluetooth / vibration"
+echo "copy the repository (with dist/) to the phone, then: sudo extras/install.sh usb-c-display / audio / notification-led / bluetooth / vibration / microsd"
