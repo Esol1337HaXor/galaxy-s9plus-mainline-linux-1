@@ -318,15 +318,21 @@ static void set_otg(struct s9p_usbc *u, bool on)
 /*
  * Sink: the port's MUIC driver used to set the charger's input limit; with it
  * replaced, nobody did and the phone sat at 500 mA, less than it draws with a
- * desktop. Follow the Type-C current the source advertises on CC (capped at
- * 1.5 A: no PD contract, 5 V only).
+ * desktop. Follow the Type-C current the source advertises on CC (no PD
+ * contract, 5 V only; Rp 3.0 A is a plain Type-C level, legal without PD),
+ * and set the battery's fast-charge current to match: nobody set that one
+ * either, it stayed at whatever the bootloader left (900 mA measured). At
+ * 1.5 A in, 900 mA into the battery leaves the desktop its ~0.5 A; at 3 A in,
+ * 1.5 A (0.43 C on the 3500 mAh cell, well inside Samsung's 2.1 A).
  */
 static void set_input_limit(struct s9p_usbc *u, int cc0)
 {
-	static const int ua[] = { 0, 500000, 1500000, 1500000 };
-	union power_supply_propval v = { .intval = ua[CC_STATUS0_CCI(cc0)] };
+	static const int in_ua[] = { 0, 500000, 1500000, 3000000 };
+	static const int chg_ua[] = { 0, 450000, 900000, 1500000 };
+	union power_supply_propval v = { .intval = in_ua[CC_STATUS0_CCI(cc0)] };
+	union power_supply_propval c = { .intval = chg_ua[CC_STATUS0_CCI(cc0)] };
 	struct power_supply *psy;
-	int ret;
+	int ret, ret2;
 
 	if (!v.intval || v.intval == u->in_limit)
 		return;
@@ -334,8 +340,10 @@ static void set_input_limit(struct s9p_usbc *u, int cc0)
 	if (!psy)
 		return;
 	ret = power_supply_set_property(psy, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &v);
+	ret2 = power_supply_set_property(psy, POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT, &c);
 	power_supply_put(psy);
-	ulog(u, "input current limit %d mA (Rp %u): %d", v.intval / 1000, CC_STATUS0_CCI(cc0), ret);
+	ulog(u, "input current limit %d mA, charge current %d mA (Rp %u): %d %d",
+	     v.intval / 1000, c.intval / 1000, CC_STATUS0_CCI(cc0), ret, ret2);
 	if (!ret)
 		u->in_limit = v.intval;
 }

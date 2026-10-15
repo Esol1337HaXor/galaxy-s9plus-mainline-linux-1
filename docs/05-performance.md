@@ -149,6 +149,47 @@ core spent the run at 2327 and 1794 MHz: at 77-80 C the thermal cap steps it
 down before 2704 MHz matters. Sustained, the ceiling is thermal, not the
 boost; it stays off by default.
 
+## 6. Idle power -- measured at the battery
+
+**Method.** With the phone on USB, the MAX77705's `CHG_CNFG_00` set to 0
+(charger and input buck off) makes the system run from the battery while the
+cable stays in; the fuel gauge's `current_now` is then the whole phone. 40-60 s
+averages, idle GNOME desktop, no monitor, Wi-Fi up; `CNFG_00` goes back to
+`0x05` on exit. The averages scatter by about +-60 mW between runs, so every
+number below is a pair taken back to back.
+
+| idle desktop | battery |
+|---|---|
+| as booted (WFI only, memory at 1794 MHz, every PMU domain on) | 1.79-1.93 W |
+| CPU clusters held at their lowest steps | -100 mW |
+| Wi-Fi power save on | -160 mW (off by default: see known issues) |
+| unused PMU domains off (`s9p-pd-off`) | -90 mW |
+| memory at 421 MHz instead of 1794 MHz | -165 mW |
+| memory governor (`s9p-mif`) instead of the fixed 1794 MHz | -150 mW |
+
+**The memory clock.** sboot leaves the MIF at 1794 MHz and the port never
+touched it. The vendor kernel scales it through the APM firmware with
+`exynos_acpm_set_rate(dvfs_mif, kHz)`; its acpm_dvfs device is the CMU node,
+which has no `acpm-ipc-channel`, so the channel number stays 0 and the request
+goes out on ACPM **channel 0** -- not channel 5, the one the DT names for
+`acpm_dvfs`, which never answers. On channel 0 the APM switches the memory
+itself (PLL_MIF `0x1b800120`, or the shared PLLs below 1014 MHz). 3917 random
+level changes under three memory-copy jobs and a CPU job: no wrong digest.
+At 421 MHz a single memory-copy thread runs 38 % slower, so the governor
+follows CPU busy time (not the CPU clock, which schedutil lifts for a few ms
+whenever anything runs), the GPU clock and the USB-C monitor.
+
+**The power domains.** All fifteen are on after sboot; the vendor kernel turns
+off DCRD/DCPOST/DCF in `pmucal_lpm_init` and the rest through runtime PM.
+`s9p-pd-off` does the same for the eleven no driver of the port uses, with the
+TrustZone protection save (`SMC 0x82000410`) for those that have `need_smc`.
+MFC refuses a second power-down after being switched back on (STATUS stays
+`0x0015000f`); the module then puts it back on cleanly.
+
+**What is left.** About 1.6 W. The CPUs never power down (no cpuidle state,
+hotplug does not reach the PMU: CPU_OFF leaves the core's STATUS at `0xf`),
+and that is the next target. Wi-Fi power save is worth another 160 mW.
+
 ## Where it stands
 
 | | before | after |

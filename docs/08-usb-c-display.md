@@ -184,4 +184,4 @@ Module parameters go to `/etc/s9p-dp.conf` (one line, `name=value ...`):
 | Picture shifted and wrapped (different every time), black lines at the bottom | DECON2 started at a random point of the DP frame; the controller kept its place across restarts | DECON2 on `VSYNC_DET`; controller + PHY reset on unblank (measured with an HDMI capture: offset 0 on boot and 6/6 unblanks) |
 | Reboot with a hub plugged waited for an unplug | VBUS stayed on into the bootloader | VBUS off in `.shutdown` |
 | AUX and the hub dead late at night | battery at 5 %: no PD contract | charge the phone |
-| Phone stopped charging after using a hub | the charger was left in a mode without charging when OTG went off; input limit stayed at 500 mA | `CNFG_00` back to charge mode when OTG goes off; input limit from the Type-C current the source advertises (up to 1.5 A) |
+| Phone stopped charging after using a hub | the charger was left in a mode without charging when OTG went off; input limit stayed at 500 mA | `CNFG_00` back to charge mode when OTG goes off; input limit from the Type-C current the source advertises (0.5 / 1.5 / 3 A), battery charge current to match (450 / 900 / 1500 mA) |

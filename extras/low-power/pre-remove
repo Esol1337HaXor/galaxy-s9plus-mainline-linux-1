@@ -1,0 +1,6 @@
+#!/bin/sh
+# Back to sboot's state (memory at 1794 MHz, domains on), remove the modules.
+K=$(uname -r)
+modprobe -r s9p-mif s9p-pd-off 2>/dev/null || true
+rm -rf "/lib/modules/$K/extra/s9p-power" /var/lib/s9p-extras/low-power
+depmod -a "$K"

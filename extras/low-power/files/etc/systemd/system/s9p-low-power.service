@@ -1,0 +1,14 @@
+[Unit]
+Description=Galaxy S9+ idle power: memory DVFS, unused power domains off
+After=systemd-modules-load.service
+# skipped until extras/install.sh has put the modules in place
+ConditionPathIsDirectory=/lib/modules/%v/extra/s9p-power
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/modprobe s9p-pd-off
+ExecStart=/sbin/modprobe s9p-mif
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
