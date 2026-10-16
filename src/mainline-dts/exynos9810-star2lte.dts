@@ -484,6 +484,37 @@
 		 */
 		timeout-sec = <60>;
 	};
+
+	/*
+	 * Multi-core timer, in the always-on domain (vendor node mct@10040000,
+	 * counting at 26 MHz from sboot). On arm64 mainline registers it below
+	 * the arch timer, so ticks and the clocksource stay on the arch timer;
+	 * what it adds is its global comparator as the tick broadcast device.
+	 * A core powered down by the C2 idle state of extras/cpu-idle loses its
+	 * arch timer, and without a real broadcast device the hrtimer fallback
+	 * pins whichever core arms it, which then never reaches C2.
+	 * SPI 466..469 are the four global comparators, 470..477 the local
+	 * timers of CPU0..7.
+	 */
+	timer@10040000 {
+		compatible = "samsung,exynos4210-mct";
+		reg = <0x10040000 0x800>;
+		interrupts = <GIC_SPI 466 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 467 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 468 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 469 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 470 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 471 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 472 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 473 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 474 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 475 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 476 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 477 IRQ_TYPE_LEVEL_HIGH>;
+		samsung,local-timers = <0 1 2 3 4 5 6 7>;
+		clocks = <&wdt_clk>, <&wdt_clk>;
+		clock-names = "fin_pll", "mct";
+	};
 };
 
 /*

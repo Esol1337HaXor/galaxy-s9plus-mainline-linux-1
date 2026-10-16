@@ -752,4 +752,114 @@ else:
     psci.write_text(s.replace(old_on, new_on, 1))
     print("arch/arm64/kernel/psci.c: M3 defaults call added")
 
+# --- CPU power management hooks for extras/cpu-idle -------------------------
+# Samsung's EL3 and APM firmware power a core down only when the kernel has
+# told the PMU first (CPU_INFORM, the core's GRP2 wake-up interrupt), which
+# the vendor kernel does in exynos-powermode.c around every PSCI CPU_SUSPEND
+# and CPU_OFF. Mainline has no place for that, so: three hooks, NULL unless
+# a module (src/cpupm/s9p-cpupm.c) fills them, and a PSCI suspend entry that
+# always saves the CPU context. The Exynos power states for cluster and
+# system sleep (0x01000000, 0x03000000, vendor psci_suspend_customized_
+# finisher) have the PSCI type bit clear, which mainline reads as "context
+# kept"; they do lose it.
+psci_fw = src / "drivers/firmware/psci/psci.c"
+s = psci_fw.read_text()
+if "S9P-SUSPEND-LOSSY" not in s:
+    s += """
+/* S9P-SUSPEND-LOSSY: PSCI CPU_SUSPEND with the context saved, any state. */
+int s9p_psci_suspend_lossy(u32 state)
+{
+	return cpu_suspend(state, psci_suspend_finisher);
+}
+EXPORT_SYMBOL_GPL(s9p_psci_suspend_lossy);
+"""
+    psci_fw.write_text(s)
+    print("drivers/firmware/psci/psci.c: S9P-SUSPEND-LOSSY added")
+
+hooks_h = """
+/* S9P-CPU-HOOKS: filled by extras/cpu-idle (s9p-cpupm), NULL otherwise. */
+struct s9p_cpu_hooks {
+	void (*die)(unsigned int cpu);		/* on the dying CPU, before CPU_OFF */
+	int (*kill)(unsigned int cpu);		/* on a live CPU, after it died */
+	void (*starting)(unsigned int cpu);	/* on a new CPU, before CPU_STARTING */
+};
+extern struct s9p_cpu_hooks s9p_cpu_hooks;
+int s9p_psci_suspend_lossy(u32 state);
+"""
+insert_before(
+    "include/linux/psci.h",
+    "#if defined(CONFIG_ARM_PSCI_FW)\n",
+    hooks_h,
+    "S9P-CPU-HOOKS",
+)
+
+hooks = """/* S9P-CPU-HOOKS */
+struct s9p_cpu_hooks s9p_cpu_hooks;
+EXPORT_SYMBOL_GPL(s9p_cpu_hooks);
+/* S9P-CPU-HOOKS-END */
+
+"""
+insert_before(
+    "arch/arm64/kernel/psci.c",
+    "static int cpu_psci_cpu_boot(unsigned int cpu)\n",
+    hooks,
+    "S9P-CPU-HOOKS",
+)
+psci = src / "arch/arm64/kernel/psci.c"
+s = psci.read_text()
+die_old = "\tpsci_ops.cpu_off(state);\n}\n"
+die_new = "\tif (s9p_cpu_hooks.die)\n\t\ts9p_cpu_hooks.die(cpu);\n\tpsci_ops.cpu_off(state);\n}\n"
+if die_new not in s:
+    assert die_old in s, "arch/arm64/kernel/psci.c: cpu_off call not found"
+    s = s.replace(die_old, die_new, 1)
+kill_old = "\tif (!psci_ops.affinity_info)\n\t\treturn 0;\n"
+kill_new = "\tif (s9p_cpu_hooks.kill)\n\t\treturn s9p_cpu_hooks.kill(cpu);\n" + kill_old
+if kill_new not in s:
+    assert kill_old in s, "arch/arm64/kernel/psci.c: affinity_info check not found"
+    s = s.replace(kill_old, kill_new, 1)
+psci.write_text(s)
+print("arch/arm64/kernel/psci.c: S9P die/kill hooks in place")
+
+smp = src / "arch/arm64/kernel/smp.c"
+s = smp.read_text()
+start_old = "\tnotify_cpu_starting(cpu);\n"
+start_new = ("\tif (s9p_cpu_hooks.starting)\n\t\ts9p_cpu_hooks.starting(cpu);\n"
+             + start_old)
+if "s9p_cpu_hooks.starting" not in s:
+    assert start_old in s, "arch/arm64/kernel/smp.c: notify_cpu_starting not found"
+    smp.write_text(s.replace(start_old, start_new, 1))
+    print("arch/arm64/kernel/smp.c: S9P starting hook added")
+
+# --- MCT on arm64: broadcast device only, keep the arch timer's sched_clock --
+# The MCT runs at the arch timer's 26 MHz; sched_clock_register() takes an
+# equal rate as a replacement, which would move sched_clock from the 56-bit
+# CNTVCT read to a 32-bit MMIO read. The clocksource and clockevents ratings
+# already keep the arch timer in charge on arm64.
+mct = src / "drivers/clocksource/exynos_mct.c"
+s = mct.read_text()
+old = "\tsched_clock_register(exynos4_read_sched_clock, 32, clk_rate);\n"
+new = ("\t/* S9P: on arm64 the arch timer stays sched_clock */\n"
+       "\tif (!IS_ENABLED(CONFIG_ARM64))\n"
+       "\t\tsched_clock_register(exynos4_read_sched_clock, 32, clk_rate);\n")
+if new not in s:
+    assert old in s, "exynos_mct.c: sched_clock_register not found"
+    mct.write_text(s.replace(old, new, 1))
+    print("drivers/clocksource/exynos_mct.c: S9P sched_clock kept on the arch timer")
+
+# --- MCT local timers as the per-CPU tick on arm64 --------------------------
+# The vendor kernel ticks every core from its MCT local timer (an SPI routed
+# to that core, in the always-on domain) and keeps the arch timer as
+# clocksource only; a core powered down in C2 then still gets its own timer
+# interrupt. The broadcast scheme (MCT global comparator + IPIs) lost wake-ups:
+# a core in C2 stayed off for good after a few hundred entries. So on arm64
+# the local timers rank above the arch timer (450), the clocksource stays
+# below it (350, the arch counter is far cheaper to read).
+s = mct.read_text()
+old = "#define MCT_CLKSOURCE_RATING\t\t350\n#define MCT_CLKEVENTS_RATING\t\t350\n"
+new = "#define MCT_CLKSOURCE_RATING\t\t350\n/* S9P: per-CPU tick on the MCT, as the vendor kernel */\n#define MCT_CLKEVENTS_RATING\t\t500\n"
+if new not in s:
+    assert old in s, "exynos_mct.c: arm64 ratings not found"
+    mct.write_text(s.replace(old, new, 1))
+    print("drivers/clocksource/exynos_mct.c: S9P local timers as the tick")
+
 print("PATCH_TREE_OK")
