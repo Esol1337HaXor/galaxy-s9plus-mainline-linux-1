@@ -44,6 +44,9 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/psci.h>
+#include <linux/reboot.h>
+#include <linux/sched.h>
+#include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
@@ -116,6 +119,15 @@ static void core_off(unsigned int phy)
 
 	raw_spin_lock_irqsave(&pmu_lock, flags);
 	writel_relaxed(INFORM_C2, pmu + CPU_INFORM(phy));
+	/*
+	 * GRP2 pending latches every WFI of the core, enabled or not (0xef
+	 * after boot). The vendor clears it only on the way back up; a stale
+	 * one hands the APM a power-down request while the core is still
+	 * running, the APM drops it, and the real WFI later finds nothing
+	 * pending: the core sits in EL3's WFI, powered, for good. Clear first.
+	 */
+	writel_relaxed(b, intr + GRP2_CLEAR);
+	dsb(sy);
 	rmw(intr, GRP2_ENABLE, 0, b);
 	if (readl_relaxed(intr + GRP1_PEND) & b)
 		writel_relaxed(b, intr + GRP1_CLEAR);
@@ -155,6 +167,7 @@ static __cpuidle int wfi_enter(struct cpuidle_device *dev, struct cpuidle_driver
  */
 static unsigned int going_down = UINT_MAX;	/* phy of the core in flight */
 static DEFINE_PER_CPU(unsigned long, c2_busy);
+static DEFINE_PER_CPU(u64, c2_since);	/* jiffies64 of the entry, 0 outside */
 
 static bool claim_transition(unsigned int phy)
 {
@@ -197,7 +210,9 @@ static __cpuidle int c2_enter(struct cpuidle_device *dev, struct cpuidle_driver 
 		return -EBUSY;
 	}
 	core_off(phy);
+	WRITE_ONCE(*this_cpu_ptr(&c2_since), get_jiffies_64() | 1);
 	ret = s9p_psci_suspend_lossy(PSCI_C2);
+	WRITE_ONCE(*this_cpu_ptr(&c2_since), 0);
 	core_on(phy);
 	release_transition(phy);
 	cpu_pm_exit();
@@ -275,6 +290,111 @@ static void hp_starting(unsigned int cpu)
 	core_on(phy_of(cpu));
 }
 
+/* ----------------------------------------------------------- deadman */
+
+/*
+ * Bring-up aid: a core that never leaves C2 stalls whatever is queued on it,
+ * and the phone hangs without a trace for minutes. Once a second, from CPU0:
+ * a core in C2 for over a second gets a wake-up; if it is still there 200 ms
+ * later, the PMU, INTR_BID and FlexPMU state go to the kernel log and the
+ * phone restarts 3 s later (the flight recorder writes the log to disk).
+ */
+static bool deadman = true;
+module_param(deadman, bool, 0644);
+static void __iomem *flex;
+
+static void dump_state(unsigned int stuck)
+{
+	unsigned int cpu, i;
+
+	pr_emerg("s9p-cpupm: CPU%u did not leave C2\n", stuck);
+	for_each_possible_cpu(cpu)
+		pr_emerg("s9p-cpupm: cpu%u phy%u inform %08x status %08x C2 %lu\n", cpu,
+			 phy_of(cpu), readl_relaxed(pmu + CPU_INFORM(phy_of(cpu))),
+			 readl_relaxed(pmu + status_of(phy_of(cpu))), per_cpu(c2_entries, cpu));
+	pr_emerg("s9p-cpupm: GRP1 en %08x pend %08x GRP2 en %08x pend %08x GRP3 %08x/%08x GRP4 %08x/%08x evt %08x\n",
+		 readl_relaxed(intr + 0x100), readl_relaxed(intr + 0x108),
+		 readl_relaxed(intr + 0x200), readl_relaxed(intr + 0x208),
+		 readl_relaxed(intr + 0x300), readl_relaxed(intr + 0x308),
+		 readl_relaxed(intr + 0x400), readl_relaxed(intr + 0x408),
+		 readl_relaxed(pmu + EVT_EN_GRP2));
+	for (i = 0; flex && i < 0x100; i += 16)
+		pr_emerg("s9p-cpupm: flex+%03x %08x %08x %08x %08x\n", i,
+			 readl_relaxed(flex + i), readl_relaxed(flex + i + 4),
+			 readl_relaxed(flex + i + 8), readl_relaxed(flex + i + 12));
+}
+
+static void deadman_nop(void *unused)
+{
+}
+
+static DEFINE_PER_CPU(unsigned long, c2_rescues);
+
+/*
+ * The failure, caught by the dump above: the core's request reached the APM
+ * (GRP2 pending consumed) but a wake-up was already pending for it in GRP1
+ * -- an interrupt arrived while EL3 was turning the core's GIC interface off.
+ * The APM correctly aborts the power-down, and the core stays in EL3's WFI,
+ * powered, with no interrupt able to reach it. Power-cycle it through its PMU
+ * CONFIGURATION register: back on, EL3 resumes it through cpu_resume, which
+ * is exactly the normal way out of C2.
+ */
+static u32 config_of(unsigned int phy)
+{
+	return status_of(phy) - 4;
+}
+
+static bool rescue(unsigned int cpu)
+{
+	unsigned int phy = phy_of(cpu);
+	u32 v;
+
+	if (!(readl_relaxed(pmu + status_of(phy)) & 0xf))
+		return false;			/* really off: not this case */
+	pr_warn("s9p-cpupm: CPU%u held in EL3 after an aborted power-down, cycling it\n", cpu);
+	writel_relaxed(0, pmu + config_of(phy));
+	if (readl_poll_timeout(pmu + status_of(phy), v, !(v & 0xf), 10, 20000))
+		return false;
+	writel_relaxed(0xf, pmu + config_of(phy));
+	if (readl_poll_timeout(pmu + status_of(phy), v, (v & 0xf) == 0xf, 10, 20000))
+		return false;
+	per_cpu(c2_rescues, cpu)++;
+	return true;
+}
+
+static void deadman_work(struct work_struct *w);
+static DECLARE_DELAYED_WORK(deadman_dwork, deadman_work);
+static bool deadman_fired;
+
+static void deadman_work(struct work_struct *w)
+{
+	u64 now = get_jiffies_64();
+	unsigned int cpu;
+
+	for_each_online_cpu(cpu) {
+		u64 since = READ_ONCE(per_cpu(c2_since, cpu));
+
+		if (!since || time_before64(now, since + HZ))
+			continue;
+		smp_call_function_single(cpu, deadman_nop, NULL, 0);
+		msleep(200);
+		if (READ_ONCE(per_cpu(c2_since, cpu)) != since)
+			continue;
+		if (rescue(cpu)) {
+			msleep(200);
+			if (READ_ONCE(per_cpu(c2_since, cpu)) != since)
+				continue;
+		}
+		if (!deadman_fired) {
+			deadman_fired = true;
+			dump_state(cpu);
+			msleep(3000);
+			emergency_restart();
+		}
+	}
+	schedule_delayed_work_on(0, &deadman_dwork, HZ);
+}
+
 /* ------------------------------------------------------------- stats */
 
 static int stats_get(char *buf, const struct kernel_param *kp)
@@ -283,9 +403,9 @@ static int stats_get(char *buf, const struct kernel_param *kp)
 	int n = 0;
 
 	for_each_possible_cpu(cpu)
-		n += sysfs_emit_at(buf, n, "cpu%u phy%u C2 %lu errors %lu busy %lu status %08x\n", cpu,
-				   phy_of(cpu), per_cpu(c2_entries, cpu), per_cpu(c2_errors, cpu),
-				   per_cpu(c2_busy, cpu),
+		n += sysfs_emit_at(buf, n, "cpu%u phy%u C2 %lu errors %lu busy %lu rescued %lu status %08x\n",
+				   cpu, phy_of(cpu), per_cpu(c2_entries, cpu), per_cpu(c2_errors, cpu),
+				   per_cpu(c2_busy, cpu), per_cpu(c2_rescues, cpu),
 				   readl_relaxed(pmu + status_of(phy_of(cpu))));
 	return n;
 }
@@ -338,6 +458,9 @@ static int __init s9p_cpupm_init(void)
 	if (ret < 0)
 		goto err_little;
 	big_on = ret > 0;
+	flex = ioremap(0x0204f800, 0x400);
+	if (deadman)
+		schedule_delayed_work_on(0, &deadman_dwork, HZ);
 	pr_info("s9p-cpupm: C2 on CPUs %*pbl, hotplug hooks %s\n", 8, (unsigned long[]){ cpus },
 		hotplug ? "on" : "off");
 	return 0;
@@ -360,6 +483,9 @@ err:
 
 static void __exit s9p_cpupm_exit(void)
 {
+	cancel_delayed_work_sync(&deadman_dwork);
+	if (flex)
+		iounmap(flex);
 	if (big_on)
 		cpuidle_unregister(&drv_big);
 	if (little_on)

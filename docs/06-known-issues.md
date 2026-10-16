@@ -2,13 +2,39 @@
 
 Honest list. Everything here has been reproduced on the device.
 
-## CPU idle does not work
+## CPU idle: C2 works per core, not yet with every core at once
 
-Deep CPU idle remains a major power-management gap. The current kernel uses
-`WFI`; the contribution of each powered block to idle temperature has not been
-isolated with a whole-device power measurement.
+**Why the plain PSCI state hung (found 2026-10-16).** On this SoC EL3 does not
+power a core down by itself: the APM firmware (FlexPMU) does, and only when
+the kernel has told the PMU first -- `CPU_INFORM` and the core's GRP2 bit in
+the INTR_BID block, the vendor's `cal_cpu_disable` / `cal_cpu_enable`. A
+mainline PSCI idle state without that leaves the core in EL3's WFI with its
+GIC interface off and nothing to wake it.
 
-Four attempts, all reproduced:
+`src/cpupm/s9p-cpupm.c` (not in any extra yet) does the handshake as a
+cpuidle driver. The kernel side is in `patch_tree.py`:
+`s9p_psci_suspend_lossy()`, hotplug hooks, and the MCT in the DT with its
+local timers as the per-CPU tick, as in the vendor kernel (the arch timer
+stops in C2; the broadcast alternative lost wake-ups).
+
+| measured | result |
+|---|---|
+| one A55 core (CPU1, 2 or 3) in C2 | thousands of entries, PMU STATUS `0x00880000` (off), wakes on timers and IPIs (10-15 ms to start a task, same as WFI) |
+| two A55 cores | works on most runs |
+| CPU1-3 together, or with the M3 cores | a core eventually stays in C2 for good; the phone hangs until the watchdog |
+
+**The failure, caught by the module's deadman dump:** the stuck core's
+`CPU_INFORM` is 1 and its PMU STATUS still `0xf` (powered); its GRP2 pending
+bit was consumed by the APM, but a wake-up was pending for it in GRP1 -- an
+interrupt arrived while EL3 was switching the core's GIC interface off. The
+APM aborts the power-down, correctly, and nothing brings the core out of
+EL3's WFI. A rescue (power-cycling the core through its PMU CONFIGURATION
+register so EL3 resumes it via `cpu_resume`) is in the module, untested: the
+first try reset the phone without a log line.
+
+The PMU keeps `CPU_INFORM` across a warm reboot (a hung core leaves 1 or
+`0x10001`, bit 16 being EL3's mark), and GRP2 pending latches every WFI
+whether enabled or not; the module now clears both. Earlier attempts:
 
 | attempt | result |
 |---|---|
