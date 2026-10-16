@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#include <linux/reboot.h>
 #include <linux/timekeeping.h>
 #include <linux/workqueue.h>
 
@@ -380,6 +381,66 @@ out:
 		put_device(dev);
 }
 
+/*
+ * Park the APM before the SoC is reset or powered off.
+ *
+ * The vendor kernel never resets the SoC with the APM running:
+ * exynos_reboot() and exynos_power_off() both call exynos_acpm_reboot()
+ * first, which sends the framework's STOP command (bit 22 of word 0) on the
+ * ACPM node's own channel (acpm-ipc-channel = <4> in the stock DT) and waits
+ * for the answer. The firmware then finishes what it was doing -- a speedy
+ * transfer to the S2MPS18, a DVFS step -- and sits in WFI, so the reset
+ * cannot land in the middle of a PMIC transaction.
+ *
+ * Runs from the restart/power-off chain, with interrupts off: no sleeping,
+ * no mutex wait. A transfer of our own still in flight on the MFD channel
+ * is simply waited out by the APM before it reads this command. Whatever
+ * happens, the next handler (syscon-reboot, 192) still runs.
+ */
+#define FW_CHANNEL		4
+#define ACPM_IPC_STOP		BIT(22)
+#define STOP_TIMEOUT_US		50000
+
+static int s9p_acpm_park(struct sys_off_data *data)
+{
+	struct s9p_ch ch;
+	u32 front, nxt, w0, i;
+	int t;
+
+	if (!mbox || s9p_find_channel(FW_CHANNEL, &ch) || ch.q_len < 2 ||
+	    ch.q_elem_size < 16)
+		return NOTIFY_DONE;
+
+	front = sram_read(ch.tx_front);
+	nxt = (front + 1) % ch.q_len;
+	if (nxt == sram_read(ch.tx_rear)) {
+		pr_emerg("s9p-acpm: APM command ring full, resetting anyway\n");
+		return NOTIFY_DONE;
+	}
+	/* drop stale replies, so the one we wait for is the only one */
+	sram_write(ch.rx_rear, sram_read(ch.rx_front));
+	writel_relaxed(1 << ch.id, mbox + INTCR1);
+
+	w0 = ACPM_IPC_STOP | (0x3f << SEQ_SHIFT);
+	sram_write(ch.tx_base + ch.q_elem_size * front, w0);
+	for (i = 1; i < 4; i++)
+		sram_write(ch.tx_base + ch.q_elem_size * front + 4 * i, 0);
+	wmb();
+	sram_write(ch.tx_front, nxt);
+	wmb();
+	writel_relaxed((1 << ch.id) << 16, mbox + INTGR0);
+
+	for (t = 0; t < STOP_TIMEOUT_US; t += 10) {
+		if (sram_read(ch.rx_rear) != sram_read(ch.rx_front)) {
+			pr_emerg("s9p-acpm: APM parked after %d us\n", t);
+			return NOTIFY_DONE;
+		}
+		udelay(10);
+	}
+	pr_emerg("s9p-acpm: APM did not answer STOP, resetting anyway\n");
+	return NOTIFY_DONE;
+}
+
 static int __init s9p_acpm_init(void)
 {
 	int ret;
@@ -407,6 +468,11 @@ static int __init s9p_acpm_init(void)
 	pr_info("s9p-acpm: MFD channel %d: q_len=%u elem=%u commands@%08x replies@%08x\n",
 		MFD_CHANNEL, mfd_ch.q_len, mfd_ch.q_elem_size,
 		mfd_ch.tx_base, mfd_ch.rx_base);
+
+	register_sys_off_handler(SYS_OFF_MODE_RESTART, SYS_OFF_PRIO_FIRMWARE,
+				 s9p_acpm_park, NULL);
+	register_sys_off_handler(SYS_OFF_MODE_POWER_OFF, SYS_OFF_PRIO_FIRMWARE,
+				 s9p_acpm_park, NULL);
 
 	schedule_delayed_work(&s9p_touch_dwork, 2 * HZ);
 	return 0;
