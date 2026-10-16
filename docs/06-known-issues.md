@@ -110,16 +110,40 @@ capture path that reached about 51 FPS in an animated 1080p test.
 A `SIGSEGV` inside Mesa/EGL (stack in `libgallium` / `libEGL_mesa`), not a
 kernel-reported fault. It settles after a few restarts and then runs.
 
-## Warm reboots hang early
+## Reboots, panics and the watchdog
 
-Roughly every second warm restart stops early in boot. The watchdog is the
-mitigation, not the fix: WDT1 is armed from the first boot instruction
-(`s3c2410_wdt.tmr_atboot=1 tmr_margin=60`) and systemd takes over with
-`RuntimeWatchdogSec=30s` once userspace is up, so a hang turns into a reboot
-instead of a dead phone.
+**Clean reboots work.** 10 of 10 `systemctl reboot` on kernel #10
+(2026-10-17), and kernel #11 parks the APM first (`s9p-acpm`: the ACPM
+framework STOP on channel 4, as the vendor's `exynos_acpm_reboot()`), so the
+SoC is never reset in the middle of a PMIC transfer. The older "every second
+warm reboot hangs in the probe phase" is no longer reproduced; the watchdog
+stays armed from the first instruction anyway (`s3c2410_wdt.tmr_atboot=1
+tmr_margin=60`, then systemd's `RuntimeWatchdogSec=30s`). For it to reset
+anything the PMU's `MASK_WDT_RESET_REQUEST` has to be cleared -- see
+[04-drivers.md](04-drivers.md).
 
-For this to work at all the PMU's `MASK_WDT_RESET_REQUEST` has to be cleared
--- see [04-drivers.md](04-drivers.md).
+**Where an unplanned reset lands.** The kernel writes the recovery magic into
+PMU INFORM3 at 40 ms, and only a clean reboot (syscon-reboot-mode) rewrote it.
+A panic or a watchdog reset therefore always ended in TWRP, and the phone
+stayed there until `adb reboot` -- fine on a desk, fatal for a server.
+`s9p-boot-ok.timer` (device/base) now writes the normal magic two minutes into
+a boot:
+
+| measured 2026-10-17 | lands in | RST_STAT |
+|---|---|---|
+| panic (`sysrq c`) after the timer | Ubuntu, 20 s | `0x20000000` (SWRESET) |
+| WDT1 expiry after the timer | Ubuntu, 20 s | `0x00800000` (WDT1) |
+| panic in the first two minutes | TWRP | |
+
+So a kernel that panics or wedges while booting still falls back to TWRP over
+USB; anything later comes back on its own. `s9p-boot-ok status` says what the
+next unplanned reset will start.
+
+**Do not write the other PMU INFORM registers.** Probing which of them survive
+a reset (INFORM1 `0x804`, `0x81c`, `0x840`-`0x85c`, all zero at runtime) left
+the next boot dead in sboot: no USB, no watchdog, until Power + Volume Down
+were held for ten seconds; the forced reset cleared them all again. INFORM1
+is the resume-from-sleep flag on Exynos, the likeliest culprit.
 
 ## Reading the sboot framebuffer resets the SoC
 

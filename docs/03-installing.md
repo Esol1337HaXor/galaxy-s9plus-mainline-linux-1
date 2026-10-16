@@ -105,6 +105,7 @@ system ([`image/common/README.md`](../image/common/README.md)), and
 | `brcm/brcmfmac4361-pcie.*` | Wi-Fi firmware on disk too (the stable kernel has it built in) |
 | `logind.conf.d`, `sleep.conf.d`, masked sleep targets | no suspend: the big cores do not come back from it |
 | `system.conf.d/s9p-watchdog.conf` | systemd feeds the hardware watchdog (`RuntimeWatchdogSec=30s`) |
+| `s9p-boot-ok` + timer | two minutes into a healthy boot, an unplanned reset (panic, watchdog) restarts Ubuntu instead of TWRP; see [06-known-issues.md](06-known-issues.md) |
 | `gdm.service.d/10-wait-for-render-node.conf` | GDM waits for the GPU's render node |
 | `PAN_MAX_AFBC_PACKING_RATIO=0` in `/etc/environment` | Mesa texture fix, see below |
 

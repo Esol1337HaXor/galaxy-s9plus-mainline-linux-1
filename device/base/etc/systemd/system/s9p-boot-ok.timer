@@ -1,0 +1,11 @@
+[Unit]
+Description=S9+: mark the boot good once the system has been up for 2 minutes
+
+[Timer]
+# long enough that a kernel or driver that wedges while booting (or a
+# userspace that never settles) still ends in TWRP
+OnBootSec=2min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

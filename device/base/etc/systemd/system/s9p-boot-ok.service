@@ -1,0 +1,7 @@
+[Unit]
+Description=S9+: boot is good, an unplanned reset restarts Ubuntu (not TWRP)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/s9p-boot-ok

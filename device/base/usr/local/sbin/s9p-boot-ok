@@ -1,0 +1,57 @@
+#!/usr/bin/python3
+"""Mark this boot as good: the next reset starts Ubuntu again, not TWRP.
+
+The kernel writes Samsung's recovery magic into PMU INFORM3 within its first
+40 ms (clock-gates node of the device tree), so a kernel that panics or
+wedges while booting lands in TWRP, reachable over USB. Only a clean reboot
+rewrote INFORM3 (syscon-reboot-mode). A panic (panic=5) or the watchdog on a
+system that had been up for days therefore also ended in TWRP, and the
+phone stayed there until someone ran "adb reboot".
+
+This runs once the system has been up and healthy for a while
+(s9p-boot-ok.timer) and puts the "normal" magic there instead. From then on
+any reset brings the phone back into Ubuntu on its own; a kernel that does
+not get this far still falls back to TWRP.
+
+    s9p-boot-ok          mark the boot good (INFORM3 = normal)
+    s9p-boot-ok status   print what the next unplanned reset will start
+
+Only INFORM3 (PMU + 0x80c) is touched, with the values syscon-reboot-mode
+uses. Do not write other PMU INFORM registers: sboot reads INFORM1 as a
+resume-from-sleep flag, and a value there left the phone dead on the next
+reset (no USB, no watchdog) until Power + Volume Down were held.
+"""
+import mmap
+import os
+import struct
+import sys
+
+INFORM3 = 0x1406080C
+NORMAL = 0x12345670
+RECOVERY = 0x12345674
+NAMES = {NORMAL: "ubuntu (normal)", RECOVERY: "twrp (recovery)",
+         0x12345671: "download", 0x1234567D: "bootloader"}
+
+
+def reg(val=None):
+    page = INFORM3 & ~(mmap.PAGESIZE - 1)
+    fd = os.open("/dev/mem", os.O_RDWR | os.O_SYNC)
+    try:
+        m = mmap.mmap(fd, mmap.PAGESIZE, mmap.MAP_SHARED,
+                      mmap.PROT_READ | mmap.PROT_WRITE, offset=page)
+    finally:
+        os.close(fd)
+    off = INFORM3 - page
+    if val is not None:
+        struct.pack_into("<I", m, off, val)
+    v = struct.unpack_from("<I", m, off)[0]
+    m.close()
+    return v
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "status":
+    v = reg()
+else:
+    v = reg(NORMAL)
+print(f"INFORM3 = {v:#010x}: next unplanned reset -> {NAMES.get(v, 'unknown')}")
+sys.exit(0 if v in NAMES else 1)
