@@ -176,10 +176,20 @@ answers, so this lives in `s9p-mobile` and not in a second service.
 - A lost data call is reported (the bearer disconnects) and NetworkManager
   redials. Signal quality is from RSRP (getSignalStrength_1_4 every 30 s,
   plus the indications); IMEI and baseband version from rild.
+- Any SIM: the APN comes from the operator database by the SIM's MCC/MNC
+  (NetworkManager's `auto-config`), and an operator or MVNO that is not
+  there gets one in Settings > Mobile Network; `s9p-mobile` attaches with
+  the APN NetworkManager connects with when it differs (tested with
+  `movistar.es`). A SIM that wants its PIN shows the modem locked, and
+  NetworkManager asks for the PIN (GNOME's dialog) and sends it
+  (`Sim.SendPin`, also `SendPuk`); `S9P_SIM_PIN` unlocks it at boot without
+  anyone there. No SIM: the modem shows, failed, "SIM missing". The data
+  call is asked for on LTE, and every third try on 3G.
 - Only root may connect, disconnect or switch off (NetworkManager); anyone
   may read, as with ModemManager. `/etc/dbus-1/system.d/s9p-mobile.conf`.
 - What ModemManager would also do (bands, modes, network scan, PIN
-  changes, SMS, location) answers "not implemented".
+  changes, SMS, location) answers "not implemented". Only the SIM in the
+  first slot is used (the CP is booted single-SIM).
 
 Three things NetworkManager needs that took finding out:
 

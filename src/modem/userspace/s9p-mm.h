@@ -45,6 +45,15 @@ struct mm_ip {
 void mm_start(void);
 void mm_set_state(int state);
 void mm_set_sim(const char *imsi, const char *operator_code, const char *operator_name);
+/* no SIM in the slot: the modem shows, failed, "SIM missing" */
+void mm_set_sim_missing(void);
+/* MMModemLock */
+enum { MM_LOCK_NONE = 1, MM_LOCK_SIM_PIN = 2, MM_LOCK_SIM_PUK = 4 };
+/* the SIM wants its PIN (or PUK): NetworkManager asks for it (GNOME's dialog)
+ * and sends it with mobile_send_pin(); retries < 0: not known */
+void mm_set_locked(int lock, int retries);
+/* the answer to mobile_send_pin(): error NULL when the SIM took it */
+void mm_unlock_done(const char *error, int retries);
 void mm_set_identity(const char *imei, const char *revision);
 /* 0-100 */
 void mm_set_signal(guint quality);
@@ -62,5 +71,7 @@ void mobile_connect(const char *apn, const char *user, const char *password, gbo
 void mobile_disconnect(void);
 /* NetworkManager's mobile broadband switch: off ends data, the radio stays on */
 void mobile_enable(gboolean on);
+/* the SIM's PIN, or with puk set, its PUK and a new PIN; answer with mm_unlock_done() */
+void mobile_send_pin(const char *puk, const char *pin);
 
 #endif

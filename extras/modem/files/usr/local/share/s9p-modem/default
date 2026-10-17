@@ -5,6 +5,9 @@
 # shows in GNOME (Quick Settings, Settings > Mobile Network): the APN,
 # roaming and on/off are set there, in the "Mobile data" connection.
 S9P_MOBILE_DATA=yes
+# A SIM with a PIN: GNOME asks for it. To unlock it at boot without anyone
+# there, put it here (once per boot: a wrong one does not use up the tries).
+#S9P_SIM_PIN=
 # "no": s9p-mobile connects on its own, without NetworkManager or GNOME, and
 # the settings below apply. The APN comes from mobile-broadband-provider-info
 # by the SIM's MCC/MNC unless set here.

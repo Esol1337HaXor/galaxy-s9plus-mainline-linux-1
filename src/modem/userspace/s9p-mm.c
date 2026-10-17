@@ -46,6 +46,8 @@
 #define SIM_REMOVABLE		1
 #define REASON_USER		1	/* MMModemStateChangeReason USER_REQUESTED */
 #define REASON_UNKNOWN		0
+#define FAILED_SIM_MISSING	2
+#define ERR_EQUIPMENT	"org.freedesktop.ModemManager1.Error.MobileEquipment."
 
 static GDBusConnection *bus;
 static GDBusObjectManagerServer *manager;
@@ -65,6 +67,9 @@ static GDBusMethodInvocation *pending_connect;
 static gboolean pending_simple;
 /* Simple.Disconnect, Bearer.Disconnect or Modem.Enable(false) waiting */
 static GSList *pending_disconnect;
+/* Sim.SendPin or Sim.SendPuk waiting for the SIM's answer */
+static GDBusMethodInvocation *pending_unlock;
+static gboolean sim_missing;
 
 static const char *const no_strings[] = { NULL };
 
@@ -163,16 +168,12 @@ void mm_set_identity(const char *imei, const char *revision)
 		s9p_mm_modem_set_revision(modem, revision);
 }
 
-void mm_set_sim(const char *imsi, const char *code, const char *name)
+static gboolean sim_send_pin(S9pMmSim *s, GDBusMethodInvocation *inv, const char *pin, gpointer d);
+static gboolean sim_send_puk(S9pMmSim *s, GDBusMethodInvocation *inv, const char *puk,
+			     const char *pin, gpointer d);
+
+static void sim_create(void)
 {
-	if (!modem)
-		return;
-	g_free(operator_code);
-	g_free(operator_name);
-	operator_code = g_strdup(code ? code : "");
-	operator_name = g_strdup(name ? name : "");
-	s9p_mm_modem_modem3gpp_set_operator_code(m3gpp, operator_code);
-	s9p_mm_modem_modem3gpp_set_operator_name(m3gpp, operator_name);
 	if (!sim) {
 		const char *const slots[] = { SIM_PATH, NULL };
 
@@ -187,14 +188,127 @@ void mm_set_sim(const char *imsi, const char *code, const char *name)
 		s9p_mm_sim_set_sim_type(sim, SIM_PHYSICAL);
 		s9p_mm_sim_set_esim_status(sim, 0);
 		s9p_mm_sim_set_removability(sim, SIM_REMOVABLE);
+		s9p_mm_sim_set_imsi(sim, "");
+		s9p_mm_sim_set_operator_identifier(sim, "");
+		s9p_mm_sim_set_operator_name(sim, "");
+		g_signal_connect(sim, "handle-send-pin", G_CALLBACK(sim_send_pin), NULL);
+		g_signal_connect(sim, "handle-send-puk", G_CALLBACK(sim_send_puk), NULL);
 		g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(sim), bus, SIM_PATH, NULL);
 		s9p_mm_modem_set_sim(modem, SIM_PATH);
 		s9p_mm_modem_set_sim_slots(modem, slots);
 	}
+	sim_missing = FALSE;
+}
+
+void mm_set_sim(const char *imsi, const char *code, const char *name)
+{
+	if (!modem)
+		return;
+	g_free(operator_code);
+	g_free(operator_name);
+	operator_code = g_strdup(code ? code : "");
+	operator_name = g_strdup(name ? name : "");
+	s9p_mm_modem_modem3gpp_set_operator_code(m3gpp, operator_code);
+	s9p_mm_modem_modem3gpp_set_operator_name(m3gpp, operator_name);
+	sim_create();
+	s9p_mm_modem_set_unlock_required(modem, LOCK_NONE);
+	s9p_mm_modem_set_state_failed_reason(modem, 0);
 	s9p_mm_sim_set_imsi(sim, imsi ? imsi : "");
 	s9p_mm_sim_set_operator_identifier(sim, operator_code);
 	s9p_mm_sim_set_operator_name(sim, operator_name);
 	export_modem();
+}
+
+void mm_set_sim_missing(void)
+{
+	if (!modem || sim_missing)
+		return;
+	sim_missing = TRUE;
+	s9p_mm_modem_set_state_failed_reason(modem, FAILED_SIM_MISSING);
+	set_state(MM_STATE_FAILED);
+	export_modem();
+}
+
+static void set_retries(int lock, int retries)
+{
+	GVariantBuilder b;
+
+	g_variant_builder_init(&b, G_VARIANT_TYPE("a{uu}"));
+	if (retries >= 0)
+		g_variant_builder_add(&b, "{uu}", (guint32)lock, (guint32)retries);
+	s9p_mm_modem_set_unlock_retries(modem, g_variant_builder_end(&b));
+}
+
+void mm_set_locked(int lock, int retries)
+{
+	if (!modem)
+		return;
+	sim_create();
+	s9p_mm_modem_set_state_failed_reason(modem, 0);
+	s9p_mm_modem_set_unlock_required(modem, lock);
+	set_retries(lock, retries);
+	set_state(MM_STATE_LOCKED);
+	export_modem();
+}
+
+void mm_unlock_done(const char *error, int retries)
+{
+	GDBusMethodInvocation *inv = g_steal_pointer(&pending_unlock);
+	int lock;
+
+	if (!modem)
+		return;
+	lock = s9p_mm_modem_get_unlock_required(modem);
+	if (error) {
+		set_retries(lock, retries);
+		if (inv)
+			g_dbus_method_invocation_return_dbus_error(inv, ERR_EQUIPMENT "IncorrectPassword", error);
+		return;
+	}
+	s9p_mm_modem_set_unlock_required(modem, LOCK_NONE);
+	set_retries(lock, -1);
+	/* on to reading the SIM; NetworkManager expects this after an unlock */
+	set_state(MM_STATE_INITIALIZING);
+	if (!inv)
+		return;
+	if (lock == MM_LOCK_SIM_PUK)
+		s9p_mm_sim_complete_send_puk(sim, inv);
+	else
+		s9p_mm_sim_complete_send_pin(sim, inv);
+}
+
+static gboolean unlock_request(GDBusMethodInvocation *inv, int wanted)
+{
+	if (!caller_is_root(inv))
+		return FALSE;
+	if (pending_unlock) {
+		g_dbus_method_invocation_return_dbus_error(inv, ERR_CORE "InProgress", "already unlocking");
+		return FALSE;
+	}
+	if (s9p_mm_modem_get_unlock_required(modem) != wanted) {
+		g_dbus_method_invocation_return_dbus_error(inv, ERR_CORE "WrongState",
+			wanted == MM_LOCK_SIM_PIN ? "the SIM does not want its PIN" : "the SIM does not want its PUK");
+		return FALSE;
+	}
+	pending_unlock = inv;
+	return TRUE;
+}
+
+static gboolean sim_send_pin(S9pMmSim *s, GDBusMethodInvocation *inv, const char *pin, gpointer d)
+{
+	(void)s; (void)d;
+	if (unlock_request(inv, MM_LOCK_SIM_PIN))
+		mobile_send_pin(NULL, pin);
+	return TRUE;
+}
+
+static gboolean sim_send_puk(S9pMmSim *s, GDBusMethodInvocation *inv, const char *puk,
+			     const char *pin, gpointer d)
+{
+	(void)s; (void)d;
+	if (unlock_request(inv, MM_LOCK_SIM_PUK))
+		mobile_send_pin(puk, pin);
+	return TRUE;
 }
 
 /* ---- the bearer: one data call ---- */
@@ -586,10 +700,10 @@ static void modem_init(void)
 
 static gboolean name_owned, modem_exported;
 
-/* on the bus once the name is ours and the SIM is known */
+/* on the bus once the name is ours and the SIM is known (or known missing) */
 static void export_modem(void)
 {
-	if (modem_exported || !name_owned || !sim)
+	if (modem_exported || !name_owned || (!sim && !sim_missing))
 		return;
 	modem_exported = TRUE;
 	g_dbus_object_manager_server_export(manager, G_DBUS_OBJECT_SKELETON(modem_obj));

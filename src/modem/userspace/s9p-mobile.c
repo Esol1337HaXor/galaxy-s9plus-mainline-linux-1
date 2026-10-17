@@ -27,6 +27,8 @@
  *                                 integration; the settings below then apply)
  *   S9P_APN, S9P_APN_USER, S9P_APN_PASSWORD   instead of the database's
  *   S9P_DATA_ROAMING=yes          data when roaming
+ *   S9P_SIM_PIN=1234              unlock the SIM at boot (without it, GNOME
+ *                                 asks for the PIN through NetworkManager)
  *   S9P_DATA_METRIC=750           default route metric (Wi-Fi: 600)
  * State for other programs: /run/s9p-modem/mobile (key=value).
  */
@@ -60,6 +62,8 @@ static struct {
 	gboolean roaming;
 	int metric;
 	gboolean nm;		/* NetworkManager drives the data call */
+	char *pin;		/* S9P_SIM_PIN */
+	gboolean pin_tried;	/* once per boot: a wrong PIN must not burn the retries */
 } cfg;
 
 static struct {
@@ -421,7 +425,14 @@ static gboolean setup_data_cb(gpointer d)
 	(void)d;
 	st.retry = 0;
 	req = radio_request_new(client, RADIO_REQ_SETUP_DATA_CALL_1_4, &w, data_done, NULL, NULL);
-	gbinder_writer_append_int32(&w, RADIO_ACCESS_NETWORK_EUTRAN);
+	/*
+	 * The access network the call is for; it fails when that is not the one
+	 * in use. LTE first (the first try often fails anyway: "ps not regi"),
+	 * then 3G for places without LTE. libgbinder-radio misses the
+	 * registration answers that would say which one it is.
+	 */
+	gbinder_writer_append_int32(&w, st.failures % 3 == 2 ? RADIO_ACCESS_NETWORK_UTRAN
+							       : RADIO_ACCESS_NETWORK_EUTRAN);
 	if (cfg.nm)
 		s9p_write_data_profile(&w, st.apn, st.user, st.pass, RADIO_PDP_PROTOCOL_IPV4V6);
 	else
@@ -586,6 +597,127 @@ static void imsi_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp
 	log_msg("operator %s (%s), APN %s", cfg.operator, cfg.provider ? cfg.provider : "?", cfg.apn);
 	write_state("connecting");
 	start_radio();
+}
+
+/* ---- the SIM: there, locked or ready ---- */
+
+static gboolean sim_status_cb(gpointer d);
+
+static void pin_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp,
+		     RADIO_ERROR err, const GBinderReader *args, gpointer d)
+{
+	GBinderReader r;
+	gint32 retries = -1;
+
+	(void)req; (void)resp; (void)d;
+	if (status == RADIO_TX_STATUS_OK) {
+		gbinder_reader_copy(&r, args);
+		gbinder_reader_read_int32(&r, &retries);
+	}
+	if (status == RADIO_TX_STATUS_OK && err == RADIO_ERROR_NONE) {
+		log_msg("SIM unlocked");
+		mm_unlock_done(NULL, retries);
+		schedule(3, sim_status_cb);
+		return;
+	}
+	log_msg("SIM refused the code (error %d), %d tries left", err, retries);
+	mm_unlock_done(err == RADIO_ERROR_PASSWORD_INCORRECT ? "wrong code" : "the SIM refused it", retries);
+	write_state("sim-locked");
+}
+
+void mobile_send_pin(const char *puk, const char *pin)
+{
+	GBinderWriter w;
+	RadioRequest *req;
+
+	req = radio_request_new(client, puk ? RADIO_REQ_SUPPLY_ICC_PUK_FOR_APP : RADIO_REQ_SUPPLY_ICC_PIN_FOR_APP,
+				&w, pin_done, NULL, NULL);
+	if (puk)
+		gbinder_writer_append_hidl_string(&w, puk);
+	gbinder_writer_append_hidl_string(&w, pin);
+	gbinder_writer_append_hidl_string(&w, "");	/* aid: the default app */
+	radio_request_set_timeout(req, 30000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+}
+
+static gboolean get_imsi_cb(gpointer d);
+
+static void sim_status_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp,
+			    RADIO_ERROR err, const GBinderReader *args, gpointer d)
+{
+	GBinderReader r;
+	GBinderBuffer *buf = NULL;
+	const RadioCardStatus *cs = NULL;
+	const RadioAppStatus *app = NULL;
+	guint i;
+
+	(void)req; (void)resp; (void)d;
+	if (status == RADIO_TX_STATUS_OK && err == RADIO_ERROR_NONE) {
+		gbinder_reader_copy(&r, args);
+		buf = gbinder_reader_read_buffer(&r);
+		if (buf && buf->size >= sizeof(*cs))
+			cs = buf->data;
+	}
+	if (!cs) {
+		schedule(5, sim_status_cb);	/* rild not ready yet */
+		goto out;
+	}
+	if (cs->cardState == RADIO_CARD_STATE_ABSENT) {
+		log_msg("no SIM");
+		write_state("no-sim");
+		mm_set_sim_missing();
+		schedule(30, sim_status_cb);
+		goto out;
+	}
+	/* the GSM/UMTS app: the one rild names, or the first SIM/USIM one
+	 * (AppStatus_1_5 is bigger; 1.4 replies carry the 1.0 one) */
+	{
+		const RadioAppStatus *apps = cs->apps.data.ptr;
+		gint32 n = cs->gsmUmtsSubscriptionAppIndex;
+
+		if (apps && n >= 0 && (guint)n < cs->apps.count)
+			app = &apps[n];
+		for (i = 0; !app && apps && i < cs->apps.count; i++)
+			if (apps[i].appType == RADIO_APP_TYPE_SIM || apps[i].appType == RADIO_APP_TYPE_USIM)
+				app = &apps[i];
+	}
+	if (!app || app->appState == RADIO_APP_STATE_UNKNOWN || app->appState == RADIO_APP_STATE_DETECTED) {
+		schedule(3, sim_status_cb);	/* still being read */
+		goto out;
+	}
+	if (app->appState == RADIO_APP_STATE_PIN || app->appState == RADIO_APP_STATE_PUK) {
+		gboolean puk = app->appState == RADIO_APP_STATE_PUK;
+
+		write_state("sim-locked");
+		mm_set_locked(puk ? MM_LOCK_SIM_PUK : MM_LOCK_SIM_PIN, -1);
+		if (!puk && cfg.pin && !cfg.pin_tried) {
+			cfg.pin_tried = TRUE;
+			log_msg("SIM wants its PIN: using S9P_SIM_PIN");
+			mobile_send_pin(NULL, cfg.pin);
+		} else {
+			log_msg("SIM wants its %s%s", puk ? "PUK" : "PIN",
+				cfg.nm ? ": NetworkManager asks for it" : ": set S9P_SIM_PIN");
+		}
+		goto out;	/* pin_done goes on */
+	}
+	schedule(1, get_imsi_cb);
+out:
+	if (buf)
+		gbinder_buffer_free(buf);
+}
+
+static gboolean sim_status_cb(gpointer d)
+{
+	RadioRequest *req;
+
+	(void)d;
+	st.retry = 0;
+	req = radio_request_new(client, RADIO_REQ_GET_ICC_CARD_STATUS, NULL, sim_status_done, NULL, NULL);
+	radio_request_set_timeout(req, 20000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+	return G_SOURCE_REMOVE;
 }
 
 static gboolean get_imsi_cb(gpointer d)
@@ -811,7 +943,7 @@ static gboolean connect_cb(gpointer d)
 	radio_client_add_indication_handler(client, RADIO_IND_ANY, indication, NULL);
 	log_msg("connected to IRadio/slot1");
 	/* give libsec-ril time to read the SIM */
-	schedule(5, get_imsi_cb);
+	schedule(5, sim_status_cb);
 	g_timeout_add_seconds(30, watch_cb, NULL);
 	if (cfg.nm) {
 		ask_identity();
@@ -836,6 +968,8 @@ int main(void)
 	cfg.roaming = !g_ascii_strcasecmp(env("S9P_DATA_ROAMING", "no"), "yes");
 	cfg.metric = atoi(env("S9P_DATA_METRIC", "750"));
 	cfg.nm = !!g_ascii_strcasecmp(env("S9P_MOBILE_NETWORKMANAGER", "yes"), "no");
+	if (getenv("S9P_SIM_PIN") && *getenv("S9P_SIM_PIN"))
+		cfg.pin = g_strdup(getenv("S9P_SIM_PIN"));
 	write_state("starting");
 	loop = g_main_loop_new(NULL, FALSE);
 	if (cfg.nm)
