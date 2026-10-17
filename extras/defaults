@@ -1,0 +1,13 @@
+# The hardware features an image installs on the phone's first boot
+# (s9p-hardware-setup.service), in this order: bluetooth needs the expander
+# usb-c-display creates. The rest of extras/ stays optional.
+usb-c-display
+audio
+notification-led
+bluetooth
+vibration
+microsd
+low-power
+power-button
+power-profiles
+modem

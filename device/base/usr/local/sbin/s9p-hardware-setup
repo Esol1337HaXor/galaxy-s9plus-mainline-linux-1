@@ -1,0 +1,24 @@
+#!/bin/sh
+# First boot: install the hardware features the image carries
+# (/usr/local/share/s9p-port/extras/defaults). They are installed on the
+# phone and not into the image because several take what they need from the
+# phone's own partitions (ABOX and Bluetooth firmware from VENDOR, the
+# Bluetooth address from EFS). Then one reboot, so that they all start in
+# order. Each feature is done once; a failed one is retried at the next boot.
+P=/usr/local/share/s9p-port
+DONE=/var/lib/s9p-extras/.hardware-setup-done
+[ ! -e $DONE ] || exit 0
+# only on the phone (the image is also booted in a VM by CI)
+grep -qs 'samsung,star2lte' /proc/device-tree/compatible || exit 0
+[ -x $P/extras/install.sh ] || { echo "no $P/extras" >&2; exit 0; }
+udevadm settle -t 30
+failed=
+for f in $(sed 's/#.*//' $P/extras/defaults); do
+	[ ! -e "/var/lib/s9p-extras/$f" ] || continue
+	echo "installing $f"
+	NO_START=1 $P/extras/install.sh "$f" || { echo "$f failed" >&2; failed="$failed $f"; }
+done
+[ -z "$failed" ] || { echo "not installed:$failed (retried at the next boot)" >&2; exit 1; }
+mkdir -p /var/lib/s9p-extras && touch $DONE
+echo "hardware set up; rebooting once"
+systemctl --no-block reboot

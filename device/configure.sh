@@ -11,7 +11,8 @@ chmod 600 /etc/NetworkManager/system-connections/usb0.nmconnection
 # stays off: the kernel is built without Bluetooth (build71.sh turns BT and
 # RFKILL off), so it could only fail and restart every 3 s.
 systemctl enable usb-gadget.service s9p-touch-power.service s9p-stability.service \
-	s9p-wifi-guard.service serial-getty@ttyGS0.service s9p-boot-ok.timer
+	s9p-wifi-guard.service serial-getty@ttyGS0.service s9p-boot-ok.timer \
+	s9p-hardware-setup.service
 
 # The common image sets up zram swap, but this kernel has no zram (and the
 # image carries no modules): zram-generator would create dev-zram0.swap for

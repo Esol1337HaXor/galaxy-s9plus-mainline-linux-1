@@ -1,0 +1,14 @@
+[Unit]
+Description=Galaxy S9+ hardware set-up (first boot)
+ConditionPathExists=!/var/lib/s9p-extras/.hardware-setup-done
+After=local-fs.target systemd-udevd.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/s9p-hardware-setup
+TimeoutStartSec=15min
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

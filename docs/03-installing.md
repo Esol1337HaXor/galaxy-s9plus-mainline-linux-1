@@ -109,9 +109,23 @@ system ([`image/common/README.md`](../image/common/README.md)), and
 | `gdm.service.d/10-wait-for-render-node.conf` | GDM waits for the GPU's render node |
 | `PAN_MAX_AFBC_PACKING_RATIO=0` in `/etc/environment` | Mesa texture fix, see below |
 
-Everything else — power profiles, the flight recorder, the apt proxy over
-USB, the bring-up tools — is in [`extras/`](../extras/) and only installed
-when you ask for it.
+| `s9p-hardware-setup` + service | **first boot: the hardware features** of [`extras/defaults`](../extras/defaults) — external display and USB host, audio, notification LED, Bluetooth, vibration, microSD, low power, power button, power profiles, modem and mobile data — then one reboot |
+
+The image carries those features, the modules built for them (`dist/extras`,
+from `scripts/build/build_extras.sh`, so build that before the image) and
+their packages in `/usr/local/share/s9p-port`. They are installed on the
+phone rather than into the image because several read the phone's own
+partitions (ABOX and Bluetooth firmware from `VENDOR`, the Bluetooth
+address from `EFS`). The first boot therefore restarts once by itself.
+
+The image also comes with **Galaxy Companion**
+([agcarbajo/galaxy-companion](https://github.com/agcarbajo/galaxy-companion)),
+the settings app for this phone: notification LED, vibration, the charge
+limit, the Bixby key.
+
+The rest — the flight recorder, the apt proxy over USB, the bring-up
+tools — is in [`extras/`](../extras/) and only installed when you ask for
+it.
 
 Two userland settings that are easy to get wrong:
 

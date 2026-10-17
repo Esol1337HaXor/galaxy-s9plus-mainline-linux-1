@@ -1,9 +1,11 @@
 # Extras
 
-Optional features for the Galaxy S9+. The normal image (`image/build-image.sh`)
-installs none of them; it is the same clean Ubuntu as on the other phones of
-this project, plus only what this phone's hardware needs. Install what you
-want on the phone itself, from a checkout of this repository:
+Features for the Galaxy S9+. The hardware ones, listed in
+[`defaults`](defaults), come with the image (`image/build-image.sh`): it
+installs them on the phone's first boot, and nothing has to be done. The
+others are optional. Either can be installed or removed on the phone itself,
+from a checkout of this repository (with `dist/`) or from the image's copy
+in `/usr/local/share/s9p-port`:
 
 ```bash
 sudo extras/install.sh                      # list
