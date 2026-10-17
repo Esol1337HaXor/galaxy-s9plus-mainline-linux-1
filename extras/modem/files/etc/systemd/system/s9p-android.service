@@ -9,6 +9,10 @@ After=s9p-modem.service
 ExecStart=/usr/bin/unshare --pid --fork --mount --propagation private /usr/local/lib/s9p-modem/android
 Restart=on-failure
 RestartSec=10
+# Android's init drops every SIGTERM sent from outside its namespace, so the
+# default stop waited the full 90 s for SIGKILL on every shutdown and reboot.
+# The rest of the cgroup gets SIGTERM and 5 s; the CP keeps running anyway.
+TimeoutStopSec=5s
 
 [Install]
 WantedBy=multi-user.target
