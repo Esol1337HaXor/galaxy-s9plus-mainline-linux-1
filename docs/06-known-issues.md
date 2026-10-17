@@ -139,6 +139,22 @@ So a kernel that panics or wedges while booting still falls back to TWRP over
 USB; anything later comes back on its own. `s9p-boot-ok status` says what the
 next unplanned reset will start.
 
+**A reboot that hangs.** Until kernel #18 the watchdog was disarmed on the way
+down, so a restart that wedged after systemd (seen once after an oops in a
+module) stayed dead until the buttons. Three things stopped it, all fixed:
+
+- `s3c2410wdt_shutdown` stops the timer and masks its reset. `patch_tree.py`
+  (`S9P-WDT-SHUTDOWN`) keeps it running and fed instead when it is active.
+- systemd-shutdown closes `/dev/watchdog` with the magic close, which stops
+  it. `s3c2410_wdt.nowayout=1` refuses that; `watchdog.stop_on_reboot=0` keeps
+  the core's reboot notifier off it as well.
+- `RebootWatchdogSec` must stay under the WDT's `max_timeout` (82 s at
+  26 MHz); 2 min could not be programmed. It is 60 s now.
+
+Tested with a module whose restart handler spins with interrupts off (and
+resets by SWRESET into TWRP after 90 s if the WDT had been found disabled):
+before, TWRP; with #18, back in Ubuntu after 82 s, `RST_STAT 0x00800000`.
+
 **Do not write the other PMU INFORM registers.** Probing which of them survive
 a reset (INFORM1 `0x804`, `0x81c`, `0x840`-`0x85c`, all zero at runtime) left
 the next boot dead in sboot: no USB, no watchdog, until Power + Volume Down

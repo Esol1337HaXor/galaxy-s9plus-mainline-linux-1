@@ -863,3 +863,42 @@ if new not in s:
     print("drivers/clocksource/exynos_mct.c: S9P local timers as the tick")
 
 print("PATCH_TREE_OK")
+
+# --- watchdog: keep watching through shutdown and reboot ---------------------
+# Mainline's s3c2410wdt_shutdown() masks the reset request and stops the
+# timer, and the watchdog core stops it on the reboot notifier. Anything that
+# then wedges -- a driver's shutdown hook, the reset itself -- leaves the
+# phone dead with nothing to restart it: measured 2026-10-17, a reboot after a
+# module oops sat dark for 15 minutes until Power + Volume Down. Here the
+# timer is fed once more (a full timeout of margin) and left running; the
+# command line sets watchdog.stop_on_reboot=0 for the core and
+# s3c2410_wdt.nowayout=1 against systemd-shutdown's magic close. A reset that
+# does happen lands in sboot as before, which re-arms the watchdog itself.
+wdt = src / "drivers/watchdog/s3c2410_wdt.c"
+s = wdt.read_text()
+old = """static void s3c2410wdt_shutdown(struct platform_device *dev)
+{
+	struct s3c2410_wdt *wdt = platform_get_drvdata(dev);
+
+	s3c2410wdt_enable(wdt, false);
+	s3c2410wdt_stop(&wdt->wdt_device);
+}"""
+new = """static void s3c2410wdt_shutdown(struct platform_device *dev)
+{
+	struct s3c2410_wdt *wdt = platform_get_drvdata(dev);
+
+	/* S9P-WDT-SHUTDOWN: keep the reset armed through shutdown and reboot */
+	if (watchdog_active(&wdt->wdt_device) ||
+	    watchdog_hw_running(&wdt->wdt_device)) {
+		s3c2410wdt_keepalive(&wdt->wdt_device);
+		return;
+	}
+	s3c2410wdt_enable(wdt, false);
+	s3c2410wdt_stop(&wdt->wdt_device);
+}"""
+if "S9P-WDT-SHUTDOWN" in s:
+    print("s3c2410_wdt.c: S9P-WDT-SHUTDOWN already there")
+else:
+    assert old in s, "s3c2410_wdt.c: shutdown hook not found"
+    wdt.write_text(s.replace(old, new, 1))
+    print("s3c2410_wdt.c: S9P-WDT-SHUTDOWN added")
