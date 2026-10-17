@@ -1,0 +1,6 @@
+#!/bin/sh
+# Remove the module; programs holding /dev/uinput keep it until they close it.
+K=$(uname -r)
+modprobe -r uinput 2>/dev/null || true
+rm -rf "/lib/modules/$K/extra/s9p-input" /var/lib/s9p-extras/uinput
+depmod -a "$K"
