@@ -139,11 +139,30 @@ and then decodes every IPC message it sends and receives):
   the radio comes on.
 - `gsm.sim.operator.numeric`, normally set by the framework from the SIM.
 
-State: registered for voice on LTE (Movistar 214-07, RSRP about -90 dBm);
-calls fall back (CSFB) to Movistar's 3G, which is weak here (RSCP -103 dBm)
-and drop during setup per the CP's own report (SSB JSON, `Etyp 4`). Data:
-the PS domain does not stay registered on LTE yet (EMM/ESM causes 0), so
-libsec-ril rejects data calls ("ps not regi").
+**Mobile data works** (2026-10-17, Movistar LTE): `rmnet0` gets an IPv4
+and an IPv6 address and Movistar's DNS; ping and HTTP go through it. The
+sequence, what Android's telephony does, with `s9p-radio`:
+
+1. `dds 0` and `mobiledata on` (ISehRadio), then `on` (radio power);
+2. `attach telefonica.es telefonica telefonica` after the radio is on
+   (libsec-ril replaces the attach APN at power-up);
+3. `dreg`: libsec-ril only refreshes its PS registration when asked
+   (telephony polls `getDataRegistrationState`); until then it rejects data
+   calls with "ps not regi";
+4. `data telefonica.es telefonica telefonica`: libsec-ril brings `rmnet0`
+   up with the address itself; routes and DNS are left to the host.
+
+libgbinder-radio misses libsec-ril's answers to the registration queries
+(the RIL log shows them); `s9p-radio` reads what it needs from elsewhere.
+
+Voice: registered on LTE (Movistar 214-07, RSRP about -90 dBm);
+calls fall back (CSFB) to Movistar's 3G, and after the switch the CP
+reports nothing more: no CALL_PROCEEDING from the network, release after
+50-70 s (SSB JSON `Etyp 4`, `CAUs 1`), also with the voice clock and audio
+path set (`s9p-radio raw 08 0a 00 05 01`, `08 05 00 06 02 00`, which
+libsec-ril turns into `SND_CLOCK_CTRL` / `SND_AUDIO_PATH_CTRL`). Movistar
+is switching 3G off; the lasting answer is VoLTE, which needs an IMS
+client. `SMS_DEVICE_READY` comes with the CS registration on LTE (SGs).
 
 
 - Call audio: the CP's voice path runs through ABOX (the `VSS` image).

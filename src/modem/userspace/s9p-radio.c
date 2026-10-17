@@ -11,6 +11,7 @@
  *   s9p-radio hangup
  *   s9p-radio attach APN [user pass]           APN for the LTE attach
  *   s9p-radio data APN [user pass]             set up a data call
+ *   s9p-radio raw 08 0a 00 05 01               OEM hook bytes (Samsung sound...)
  *   s9p-radio mobiledata [on|off]              Samsung's mobile data switch
  *   s9p-radio dds [slot]                       this slot carries mobile data (Samsung)
  *   s9p-radio ids                              IMEI and the start of the IMSI
@@ -451,6 +452,37 @@ static int dds(const char *dev, int phone)
 	return ret ? 1 : 0;
 }
 
+/* ---- OEM hook (libsecril-client's channel to libsec-ril) ---- */
+
+/* ISehRadio@2.0::sendRequestRaw(serial, vec<uint8>), transaction 0x28 */
+#define SEH_TX_SEND_REQUEST_RAW	0x28
+
+struct raw_bytes {
+	guint8 *b;
+	int n;
+};
+
+static void raw_args(GBinderWriter *w, gpointer data)
+{
+	struct raw_bytes *r = data;
+
+	gbinder_writer_append_hidl_vec(w, r->b, r->n, 1);
+}
+
+/* "08 0a 00 05 01": function, sub-command, total length (big endian), data */
+static int raw(const char *dev, int argc, char **argv)
+{
+	struct raw_bytes r = { g_new0(guint8, argc), argc };
+	int i, ret;
+
+	for (i = 0; i < argc; i++)
+		r.b[i] = strtoul(argv[i], NULL, 16);
+	ret = seh_transact(dev, SEH_TX_SEND_REQUEST_RAW, raw_args, &r);
+	printf("raw: %s\n", ret ? "failed" : "sent");
+	g_free(r.b);
+	return ret ? 1 : 0;
+}
+
 /* ---- simple requests ---- */
 
 static void fail_done(RadioRequest *req, RADIO_TX_STATUS st, RADIO_RESP resp,
@@ -654,10 +686,15 @@ int main(int argc, char **argv)
 		attach_apn(argv[2], argc > 3 ? argv[3] : "", argc > 4 ? argv[4] : "");
 	} else if (!strcmp(cmd, "data") && argc > 2) {
 		setup_data(argv[2], argc > 3 ? argv[3] : "", argc > 4 ? argv[4] : "");
+	} else if (!strcmp(cmd, "raw") && argc > 2) {
+		return raw(dev, argc - 2, argv + 2);
 	} else if (!strcmp(cmd, "mobiledata")) {
 		return mobile_data(dev, argc < 3 || strcmp(argv[2], "off"));
 	} else if (!strcmp(cmd, "dds")) {
 		return dds(dev, argc > 2 ? atoi(argv[2]) : 0);
+	} else if (!strcmp(cmd, "dreg")) {
+		/* the answer is in s9p-logcat: libgbinder-radio misses libsec-ril's reply */
+		submit(RADIO_REQ_GET_DATA_REGISTRATION_STATE, signal_done);
 	} else if (!strcmp(cmd, "ids")) {
 		ids();
 	} else if (!strcmp(cmd, "mode") && argc > 2) {

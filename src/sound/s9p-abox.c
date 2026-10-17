@@ -20,6 +20,7 @@
  */
 
 #include <linux/debugfs.h>
+#include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
@@ -746,6 +747,40 @@ static ssize_t start_vss_write(struct file *f, const char __user *buf, size_t le
 	return ret ?: len;
 }
 
+/*
+ * debugfs ipc_system: "msgtype param1 [param2 param3]" sends one system
+ * message, e.g. "0x50 2" (ABOX_SET_MODE, IN_CALL) or "0x60 1" (ABOX_SET_TYPE,
+ * SPEAKER), what Android's audio HAL sets for a call.
+ */
+static ssize_t ipc_system_write(struct file *f, const char __user *ubuf, size_t len, loff_t *pos)
+{
+	struct s9p_abox *a = f->private_data;
+	struct s9p_abox_ipc_msg m = { .ipcid = IPC_SYSTEM };
+	char buf[64];
+	int t, p[3] = { 0 }, n, ret;
+
+	if (len >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+	buf[len] = 0;
+	n = sscanf(buf, "%i %i %i %i", &t, &p[0], &p[1], &p[2]);
+	if (n < 1)
+		return -EINVAL;
+	m.msg.system.msgtype = t;
+	m.msg.system.param1 = p[0];
+	m.msg.system.param2 = p[1];
+	m.msg.system.param3 = p[2];
+	ret = s9p_abox_ipc(&m);
+	alog(a, "system msg %#x (%d %d %d) sent: %d", t, p[0], p[1], p[2], ret);
+	return ret ?: len;
+}
+
+static const struct file_operations ipc_system_fops = {
+	.open = simple_open,
+	.write = ipc_system_write,
+};
+
 static const struct file_operations start_vss_fops = {
 	.open = simple_open,
 	.write = start_vss_write,
@@ -839,6 +874,7 @@ static int s9p_abox_probe(struct platform_device *pdev)
 	debugfs_create_file("log", 0444, a->dbg, a, &log_fops);
 	debugfs_create_file("state", 0444, a->dbg, a, &state_fops);
 	debugfs_create_file("start_vss", 0200, a->dbg, a, &start_vss_fops);
+	debugfs_create_file("ipc_system", 0200, a->dbg, a, &ipc_system_fops);
 	platform_set_drvdata(pdev, a);
 	the_abox = a;
 
