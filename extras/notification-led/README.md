@@ -17,6 +17,12 @@ echo none > $L/trigger; echo 0 0 255 > $L/multi_intensity; echo 255 > $L/brightn
 echo timer > $L/trigger                                                             # blinking
 ```
 
+Blinking is done by the chip (LEDBLNK, channels in blink mode), so it goes on
+while the phone sleeps. Upstream's driver could not do it: its blink_set used
+the wrong container for an RGB LED and oopsed, wrote the times to the ramp
+register (the mainline header has LEDBLNK at 0x36; it is 0x38) and never
+switched the channels to blink mode. This copy fixes all three.
+
 Options in `/etc/modprobe.d/s9p-leds.conf`: the default trigger
 (`s9p_leds trigger=...`, empty for none) and the current at full brightness
 (`leds_max77705 max_current=20`, 1..255). Needs `scripts/build/build_extras.sh`.
