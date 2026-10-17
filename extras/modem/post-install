@@ -12,8 +12,10 @@ for p in SYSTEM VENDOR RADIO EFS; do
 done
 install -d "/lib/modules/$K/extra/s9p-modem"
 install -m644 "$SRC"/modem/*.ko "/lib/modules/$K/extra/s9p-modem/"
+# the SELinux shim for the Android container (built for bionic)
+install -m644 "$SRC"/modem/s9p-noselinux.so /usr/local/lib/s9p-modem/
 mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/modem
 depmod -a "$K"
 udevadm control --reload
 udevadm trigger --subsystem-match=block --subsystem-match=misc
-[ -n "${NO_START:-}" ] || systemctl restart s9p-modem.service
+[ -n "${NO_START:-}" ] || systemctl restart s9p-modem.service s9p-android.service

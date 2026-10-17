@@ -1,0 +1,7 @@
+#!/bin/sh
+# logcat of the modem's Android container (rild, HALs): s9p-logcat -d, -b radio...
+P=$(systemctl show -p MainPID --value s9p-android.service)
+[ "${P:-0}" != 0 ] || { echo "s9p-android.service is not running" >&2; exit 1; }
+I=$(pgrep -P "$P" -x init | head -1)
+[ -n "$I" ] || { echo "no Android init in s9p-android.service" >&2; exit 1; }
+exec nsenter -t "$I" -m -p /usr/sbin/chroot /run/s9p-modem/android /system/bin/logcat "$@"

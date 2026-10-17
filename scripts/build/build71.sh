@@ -178,6 +178,13 @@ for sym in NETDEVICES USB_NET_DRIVERS USB_USBNET USB_RTL8152 USB_NET_AX8817X \
 	USB_NET_CDC_NCM USB_NET_CDC_EEM USB_NET_RNDIS_HOST; do
 	cfg --enable "$sym"
 done
+# Binder, for the modem's userspace: Samsung's libsec-ril is a HIDL client
+# (hwbinder) and runs under Android's own rild (extras/modem). The three
+# Android devices are created at boot; binderfs for containers.
+for sym in ANDROID_BINDER_IPC ANDROID_BINDERFS; do
+	cfg --enable "$sym"
+done
+cfg --set-str ANDROID_BINDER_DEVICES "binder,hwbinder,vndbinder"
 cfg --enable BLK_DEV_INITRD
 cfg --set-str INITRAMFS_SOURCE "$RAMFS"
 cfg --set-val INITRAMFS_ROOT_UID 0

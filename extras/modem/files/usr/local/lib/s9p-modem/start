@@ -29,6 +29,18 @@ B=/dev/block/platform/11120000.ufs/by-name
 mkdir -p $B
 ln -sf "$(readlink -f /dev/disk/by-partlabel/RADIO)" $B/RADIO
 
-# as init.baseband.rc; cbd boots the CP once and exits ("Cp boot Oneshot")
-exec chroot $R /vendor/bin/cbd -tss310 -bm -mm \
+# binder for rild and its clients: one binderfs instance, shared by the
+# Android container (s9p-android.service) and host clients such as
+# libgbinder, which looks for /dev/hwbinder
+BF=/run/s9p-modem/binderfs
+mkdir -p $BF
+mountpoint -q $BF || mount -t binder binder $BF
+chmod 666 $BF/binder $BF/hwbinder $BF/vndbinder
+[ -e /dev/hwbinder ] && [ ! -L /dev/hwbinder ] || ln -sfn $BF/hwbinder /dev/hwbinder
+
+# as init.baseband.rc; cbd boots the CP once and exits ("Cp boot Oneshot").
+# Once per boot: the CP cannot be restarted short of a reboot.
+[ ! -e /run/s9p-modem/cp-booted ] || exit 0
+chroot $R /vendor/bin/cbd -tss310 -bm -mm \
 	-P platform/11120000.ufs/by-name/RADIO -n /mnt/vendor/efs
+touch /run/s9p-modem/cp-booted

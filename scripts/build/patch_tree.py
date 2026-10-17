@@ -902,3 +902,27 @@ else:
     assert old in s, "s3c2410_wdt.c: shutdown hook not found"
     wdt.write_text(s.replace(old, new, 1))
     print("s3c2410_wdt.c: S9P-WDT-SHUTDOWN added")
+
+# --- binder: transactions to nodes asking for the caller's context -----------
+# Android's service managers set txn_security_ctx on their node. Without an
+# LSM that gives contexts (Ubuntu has none here), security_secid_to_secctx()
+# returns -EOPNOTSUPP and every call to them fails, so no HIDL service can
+# register. The transaction goes through with no context instead, as when
+# the node does not ask for one (extras/modem runs Samsung's rild on binder).
+bnd = src / "drivers/android/binder.c"
+s = bnd.read_text()
+old = """		ret = security_secid_to_secctx(secid, &lsmctx);
+		if (ret < 0) {"""
+new = """		ret = security_secid_to_secctx(secid, &lsmctx);
+		/* S9P-BINDER-NOLSM: no LSM context to give: send none */
+		if (ret == -EOPNOTSUPP) {
+			lsmctx = (struct lsm_context){ };
+			ret = 0;
+		}
+		if (ret < 0) {"""
+if "S9P-BINDER-NOLSM" in s:
+    print("binder.c: S9P-BINDER-NOLSM already there")
+else:
+    assert old in s, "binder.c: secctx hook not found"
+    bnd.write_text(s.replace(old, new, 1))
+    print("binder.c: S9P-BINDER-NOLSM added")

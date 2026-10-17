@@ -1,0 +1,78 @@
+#!/bin/sh
+# Android's own init, as a property service and service supervisor for
+# Samsung's rild, inside private PID and mount namespaces (s9p-android.service
+# runs this under unshare). Nothing here reaches the host: a private /dev, a
+# private /proc with sysrq and sysctl closed, a fake /sys/power, read-only
+# SYSTEM and VENDOR. Only rild and the HALs it needs run (init.rc).
+set -eu
+L=/usr/local/lib/s9p-modem
+R=/run/s9p-modem/android	# SYSTEM + VENDOR, set up by start
+W=/run/s9p-modem/work
+V=/var/lib/s9p-modem		# what Android writes and must keep
+mkdir -p $W $V/data $V/efs/up $V/efs/wk
+
+# /dev: only what rild and the service managers use
+umount -l $R/dev
+mount -t tmpfs -o mode=755 tmpfs $R/dev
+for n in null zero full random urandom kmsg tty ptmx $(cd /dev && ls -d umts_*); do
+	touch $R/dev/$n
+	mount --bind /dev/$n $R/dev/$n
+done
+mkdir -p $R/dev/pts $R/dev/socket
+mount --bind /dev/pts $R/dev/pts
+touch $R/dev/.coldboot_done	# no ueventd here
+# the CP image, under the name ueventd gives it on Android
+touch $R/dev/mbin0
+mount --bind "$(readlink -f /dev/disk/by-partlabel/RADIO)" $R/dev/mbin0
+# binder: the instance start mounted on the host, so host clients
+# (libgbinder) talk to the same service managers
+mkdir -p $R/dev/binderfs
+mount --bind /run/s9p-modem/binderfs $R/dev/binderfs
+for b in binder hwbinder vndbinder; do ln -s binderfs/$b $R/dev/$b; done
+
+# /proc of the new PID namespace; init must not reach the host through it
+umount -l $R/proc
+mount -t proc proc $R/proc
+mount --bind /dev/null $R/proc/sysrq-trigger
+mount --bind $R/proc/sys $R/proc/sys
+mount -o remount,bind,ro $R/proc/sys
+# the sysctls init insists on writing and reading back: fakes (all of vm,
+# since mmap_rnd_compat_bits does not exist without CONFIG_COMPAT)
+mount -t tmpfs -o mode=755 tmpfs $R/proc/sys/vm
+cat /proc/sys/vm/mmap_rnd_bits > $R/proc/sys/vm/mmap_rnd_bits
+echo 16 > $R/proc/sys/vm/mmap_rnd_compat_bits
+cat /proc/sys/kernel/kptr_restrict > $W/kptr_restrict
+mount --bind $W/kptr_restrict $R/proc/sys/kernel/kptr_restrict
+# a fake /sys/power: nothing in here can suspend the phone (the suspend HAL
+# only would after system_server enables autosuspend, which nobody does)
+mount -t tmpfs -o mode=755 tmpfs $R/sys/power
+echo mem > $R/sys/power/state
+echo 0 > $R/sys/power/wakeup_count
+touch $R/sys/power/wake_lock $R/sys/power/wake_unlock
+chmod 666 $R/sys/power/*
+
+# the SELinux shim, next to the libraries of both linker namespaces
+for l in system/lib64 vendor/lib64; do
+	u=$W/$(echo $l | tr / _)
+	mkdir -p $u/up $u/wk
+	install -m644 $L/s9p-noselinux.so $u/up/
+	mount -t overlay overlay -o lowerdir=$R/$l,upperdir=$u/up,workdir=$u/wk $R/$l
+done
+# our init.rc instead of Android's and the vendor's
+mount --bind $L/init.rc $R/init.rc
+for d in system/etc/init vendor/etc/init product/etc/init odm/etc/init; do
+	[ ! -d $R/$d ] || mount -t tmpfs tmpfs $R/$d
+done
+mount --bind $V/data $R/data
+# /efs for the CP's remote file system: the real EFS read-only underneath,
+# whatever the CP writes goes to a layer of its own (EFS itself is never
+# written: it holds the IMEI)
+mkdir -p $W/efs
+mountpoint -q $W/efs || mount -o ro /dev/disk/by-partlabel/EFS $W/efs
+mount -t overlay overlay -o lowerdir=$W/efs,upperdir=$V/efs/up,workdir=$V/efs/wk $R/efs
+
+# what first-stage init would have left in the environment
+exec env -i PATH=/system/bin:/vendor/bin ANDROID_ROOT=/system ANDROID_DATA=/data \
+	INIT_STARTED_AT=0 INIT_SELINUX_TOOK=0 \
+	/usr/sbin/chroot $R /system/bin/env LD_PRELOAD=/system/lib64/s9p-noselinux.so \
+	/system/bin/init second_stage

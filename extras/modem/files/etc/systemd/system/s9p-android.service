@@ -1,0 +1,14 @@
+[Unit]
+Description=Galaxy S9+ modem: Android container with Samsung's rild
+Requires=s9p-modem.service
+After=s9p-modem.service
+
+[Service]
+# PID 1 of the namespace is Android's init; stopping the unit kills the whole
+# cgroup, so nothing of it outlives the service
+ExecStart=/usr/bin/unshare --pid --fork --mount --propagation private /usr/local/lib/s9p-modem/android
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -104,6 +104,14 @@ for d in leds haptic sdcard power modem; do
 	$K O=out-extras M="$WORK/$d-src" modules
 done
 
+echo "=== src/modem/userspace: SELinux shim for the modem's Android container ==="
+# bionic, Android 10 (API 29); no libc at link time: strdup and strlen are
+# resolved from the process's own libc when the linker preloads it
+command -v clang >/dev/null || { echo "clang and lld are needed for the modem shim (apt install clang lld)" >&2; exit 1; }
+clang --target=aarch64-linux-android29 -O2 -fPIC -shared -nostdlib -fuse-ld=lld -Wall \
+	-Wl,--hash-style=both -Wl,-soname,s9p-noselinux.so \
+	-o "$WORK/s9p-noselinux.so" "$PROJ/src/modem/userspace/s9p-noselinux.c"
+
 OUT="$PROJ/dist/extras/$KREL"
 rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds,bluetooth,haptic,sdcard,power,modem}
 # =m in the stable kernel, needed by the extras (the image installs no modules)
@@ -120,10 +128,10 @@ cp "$WORK"/leds-src/*.ko "$OUT/leds/"
 cp "$WORK"/haptic-src/*.ko "$OUT/haptic/"
 cp "$WORK"/sdcard-src/*.ko "$WORK"/exfat/exfat.ko "$OUT/sdcard/"
 cp "$WORK"/power-src/*.ko "$OUT/power/"
-cp "$WORK"/modem-src/*.ko "$OUT/modem/"
+cp "$WORK"/modem-src/*.ko "$WORK/s9p-noselinux.so" "$OUT/modem/"
 cp "$WORK"/bluetooth-src/*.ko "$OUT/bluetooth/"
 find "$WORK/bt-net" "$WORK/bt-drv" -name '*.ko' -exec cp {} "$OUT/bluetooth/" \;
 "${CROSS_COMPILE}strip" --strip-debug "$OUT"/*/*.ko
-(cd "$OUT" && sha256sum */*.ko > SHA256SUMS)
+(cd "$OUT" && sha256sum */*.ko modem/*.so > SHA256SUMS)
 echo "=== done: $(ls "$OUT"/*/*.ko | wc -l) modules in dist/extras/$KREL ==="
 echo "copy the repository (with dist/) to the phone, then: sudo extras/install.sh usb-c-display / audio / notification-led / bluetooth / vibration / microsd / low-power / modem"

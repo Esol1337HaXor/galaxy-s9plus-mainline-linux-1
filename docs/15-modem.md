@@ -1,7 +1,10 @@
 # Modem
 
-State (2026-10-17): the CP boots and comes up `ONLINE` on every boot, from
-the phone's own firmware. There is no RIL yet, so no SIM, calls, SMS or data.
+State (2026-10-17): the CP boots on every boot from the phone's own
+firmware, and Samsung's own RIL runs on top of it: the SIM is read, the radio
+registers and **a voice call goes out** (the network answers with the
+ringback tone). No call audio yet (it goes through ABOX), no SMS or data
+tested, and no desktop integration: the test client is `s9p-radio`.
 
 ## Pieces
 
@@ -10,7 +13,10 @@ the phone's own firmware. There is no RIL yet, so no SIM, calls, SMS or data.
 | kernel | Samsung's `modem_v1` (SS310AP over shared memory, SBD IPC), `mcu_ipc`, `shm_ipc` and the CP part of `pmu-cp`/`pmucal`, from the SM-G965F 4.9 kernel | `src/modem` → `s9p-modem.ko` |
 | device tree | `mcu_ipc@14170000`, `shmem@f6e00000`, `mif_pdata` (from the stock DT, no GPIOs) | `exynos9810-star2lte.dts` |
 | memory | CP region `0xf0000000` (`0x9200000`) and cp-logging `0xf9200000`, reserved | same DT |
-| userspace | Samsung's `cbd`, unchanged, from `VENDOR` | `extras/modem` |
+| userspace | Samsung's `cbd`, unchanged, from `VENDOR` | `extras/modem` (`s9p-modem.service`) |
+| RIL | Samsung's `rild` + `libsec-ril.so` under Android's own `init`, in a container | `extras/modem` (`s9p-android.service`) |
+| kernel, RIL | binder (binderfs) and a patch for binder without an LSM | `build71.sh`, `patch_tree.py` |
+| test client | `s9p-radio` (libgbinder-radio): status, radio power, PIN, dial | `src/modem/userspace` |
 
 `s9p-modem.ko` registers, in this order, the CP PMU (`s9p-cp-pmu.c`),
 `shm_ipc`, `mcu_ipc` and the modem interface (`s9p-modem-core.c`). The vendor
@@ -57,11 +63,50 @@ From there the CP repeats `CP_START` every 100 ms until a RIL opens
 - **Never `rmmod s9p-modem`.** `misc_deregister` oopses, and before kernel
   #18 the reboot after it hung with the watchdog disarmed.
 
+## The RIL: Samsung's rild in an Android container
+
+`libsec-ril.so` serves both the IPC channel (`umts_ipc0`, Samsung IPC) and the
+CP's remote file system (`umts_rfs0`) itself, and it is a HIDL service:
+`IRadio@1.4`, `ISehRadio@2.1`, `IRadioConfig`, `ISap`, over hwbinder. So
+it needs Android's property service, `hwservicemanager` and friends.
+`s9p-android.service` runs Android's own `init` (second stage) from the
+phone's `SYSTEM`, in its own PID and mount namespaces, with a short
+`init.rc`: logd, the three service managers, the suspend HAL and rild.
+
+What makes Android's userspace run on Ubuntu's kernel:
+
+- **No SELinux.** `s9p-noselinux.so` (LD_PRELOAD, built for bionic)
+  answers the libselinux calls init and the service managers make: every
+  check allowed, made-up but consistent contexts. In the kernel, binder
+  asks the LSM for the caller's context when the target node wants it (the
+  service managers do) and fails the transaction without one:
+  `S9P-BINDER-NOLSM` in `patch_tree.py` sends none instead.
+- **First-stage init is skipped**: `INIT_STARTED_AT`/`INIT_SELINUX_TOOK`
+  in the environment, `/dev/socket` and `/dev/.coldboot_done` prepared.
+- **Nothing reaches the host**: a private `/dev` (binderfs, `umts_*`,
+  `mbin0` = `RADIO`), a private `/proc` with `sysrq-trigger` on
+  `/dev/null` and `/proc/sys` read-only (the sysctls init insists on
+  writing are fake files), a fake `/sys/power` (the suspend HAL never
+  suspends anything: autosuspend is system_server's call). A fatal init
+  error reboots only the namespace.
+- **EFS stays read-only.** The CP writes NV files through RFS to `/efs`: an
+  overlay with the real `EFS` underneath and its upper layer in
+  `/var/lib/s9p-modem/efs`.
+- The binderfs instance is mounted on the host (`/run/s9p-modem/binderfs`,
+  `/dev/hwbinder`), so host clients such as libgbinder reach the same
+  service managers.
+- rild's wakelocks wait for `ISystemSuspend`: without the suspend HAL
+  every request blocks forever.
+
+`s9p-logcat` reads the container's log. Samsung's ship build logs little.
+
+Known gaps: rild waits about 10 s each time it tries to reach the IMS
+service (`imsd`, not running), and `getVoiceRegistrationState` /
+`getOperator` get no answer yet; `dial` does.
+
 ## Next
 
-- RFS: the CP asks for its NV files over `umts_rfs0` (Samsung's `rfsd`, or
-  libsamsung-ipc's implementation).
-- RIL on `umts_ipc0` (Samsung IPC FMT): Samsung's `libsec-ril` needs most of
-  Android; the open path is libsamsung-ipc + oFono/ModemManager, which do not
-  know this modem generation yet.
-- Data on `rmnet0-7`.
+- Call audio: the CP's voice path runs through ABOX (the `VSS` image).
+- The missing answers (registration, operator), the IMS wait.
+- A desktop stack: oFono with its binder plugin (Sailfish/Droidian) on
+  `/dev/hwbinder`, for GNOME Calls, SMS and mobile data on `rmnet0-7`.

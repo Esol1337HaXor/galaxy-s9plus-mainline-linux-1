@@ -2,6 +2,6 @@
 # The module is not unloaded: removing it with the CP running oopses
 # (misc_deregister) and the next reboot hangs. It is gone after a reboot.
 K=$(uname -r)
-rm -rf "/lib/modules/$K/extra/s9p-modem" /var/lib/s9p-extras/modem
+rm -rf "/lib/modules/$K/extra/s9p-modem" /var/lib/s9p-extras/modem /usr/local/lib/s9p-modem/s9p-noselinux.so
 depmod -a "$K"
 echo "reboot to stop the modem"
