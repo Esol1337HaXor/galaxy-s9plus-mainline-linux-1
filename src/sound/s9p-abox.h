@@ -15,6 +15,8 @@ enum s9p_abox_ipc_id {
 	IPC_PCMCAPTURE,
 	IPC_OFFLOAD,
 	IPC_ERAP,
+	WDMA0_BUF_FULL = 0x8,
+	WDMA1_BUF_FULL = 0x9,
 	IPC_ABOX_CONFIG = 0xa,
 	RDMA0_BUF_EMPTY = 0xb,
 	RDMA3_BUF_EMPTY = 0xe,
@@ -101,10 +103,13 @@ static_assert(sizeof(struct s9p_abox_ipc_msg) == 764);
 
 #define S9P_ABOX_RDMA_MAX	8
 #define S9P_ABOX_IOVA_RDMA(n)	(0x91000000 + 0x100000 * (n))
+#define S9P_ABOX_WDMA_MAX	5
+#define S9P_ABOX_IOVA_WDMA(n)	(0x92000000 + 0x100000 * (n))
 
 /* callbacks of the PCM layer, called in IRQ context */
 struct s9p_abox_ops {
 	void (*rdma_period)(void *data, int id, s64 pointer);	/* pointer -1: unknown */
+	void (*wdma_period)(void *data, int id, s64 pointer);	/* capture, same */
 	void (*ipc)(void *data, const struct s9p_abox_ipc_msg *m);
 };
 
@@ -112,6 +117,7 @@ int s9p_abox_ipc(struct s9p_abox_ipc_msg *msg);
 int s9p_abox_set_ops(const struct s9p_abox_ops *ops, void *data);
 bool s9p_abox_ready(void);
 void *s9p_abox_rdma_buffer(unsigned int id, dma_addr_t *pa, u32 *iova);
+void *s9p_abox_wdma_buffer(unsigned int id, dma_addr_t *pa, u32 *iova);
 int s9p_abox_uaif_bclk(unsigned int uaif, unsigned long hz);
 void __iomem *s9p_abox_sfr(void);
 struct device *s9p_abox_dev(void);

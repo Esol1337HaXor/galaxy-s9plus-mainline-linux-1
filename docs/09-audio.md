@@ -10,6 +10,7 @@ directly, following Samsung's 4.9 kernel (`sound/soc/samsung/abox/`).
 ALSA card "Galaxy S9+" (s9p-abox-pcm)
  PCM 0 Headphones: RDMA0 -> SPUS IN0 -> SIFS0 (mixer) -> UAIF0 (I2S) -> CS47L93 AIF1 -> HPOUT2
  PCM 1 Speaker:    RDMA1 -> SPUS IN1 -> SIFS1         -> UAIF1 (I2S) -> MAX98512 x2 (L 0x39, R 0x3a)
+ PCM 0 capture:    CS47L93 IN3L/IN3R (PDM mics) -> AIF1 TX -> UAIF0 MIC -> NSRC0 -> SIFM0 -> WDMA1
    RDMA: firmware, by IPC         routing, UAIF, clocks, pins: AP registers
 ```
 
@@ -119,7 +120,8 @@ speaker-test -D hw:S9,1 -c2 -r48000 -FS16_LE -t sine   # speaker, PipeWire stopp
 
 ## Known limits
 
-- Headphone jack detection and microphones are not done yet.
+- Headphone jack detection and the headset microphone (IN1BL, MICBIAS2A) are
+  not done yet.
 - 48 kHz, S16, stereo only (PipeWire resamples).
 - ABOX boots once per phone boot. After a successful boot and a suspend,
   booting it again leaves the DSP waiting in WFI: reloading `s9p-abox` needs a
@@ -138,3 +140,31 @@ speaker-test -D hw:S9,1 -c2 -r48000 -FS16_LE -t sine   # speaker, PipeWire stopp
 | Data flows, no sound | UAIF pins left as GPIO inputs | function 2 on gpb0/gpb1 |
 | Choppy playback | PipeWire timer scheduling on a stepping position | `api.alsa.disable-tsched` |
 | Headphones very loud and harsh | DAC digital volume at +31.5 dB | capped at 0 dB |
+
+## Microphones
+
+The two internal microphones are PDM microphones on the codec's IN3 input
+(the IN1AR pins in DMIC mode): the main one at the bottom on IN3L with
+MICBIAS1A, the second on IN3R with MICBIAS1C (stock `samsung,routing`).
+They reach the AP the way playback leaves it, backwards: AIF1 TX -> UAIF0
+MIC -> NSRC0 -> SIFM0 -> WDMA1, the vendor DAPM path "WDMA1 Capture". The
+firmware runs WDMA1 through `IPC_PCMCAPTURE`, the same message sequence as
+playback, into a buffer at IOVA `0x92000000 + n MiB`.
+
+Two things were needed besides the DMA side:
+
+- **The codec's AIF1 pins** (its gpio5-8) come out of reset as GPIO inputs
+  (`GPIOn_CTRL_1` = `0x2001`). Playback works that way, the AIF block still
+  sees the clocks and RXDAT, but TXDAT never drives the line: the
+  microphones recorded exact silence. `s9p-audio-board` gives the codec the
+  stock default pinctrl state (group `aif1`, function `aif1`); the pins then
+  read `0x2000`.
+- `cirrus,dmic-ref = <0 1 1 1>`, as in the stock DT.
+
+UCM device `Mic` (GNOME: "Internal microphones") routes IN3L/IN3R to AIF1TX1/2
+and turns the codec's high-pass filter on: the main microphone picks up hum
+below 200 Hz, which the filter takes from RMS 215 to 60 on a quiet desk.
+
+Verified 2026-10-17 by playing a 1 kHz tone through the speaker while
+recording: the 1 kHz component rose about 6000 times on IN3L and 5000 times
+on IN3R, 1.3 kHz did not move.

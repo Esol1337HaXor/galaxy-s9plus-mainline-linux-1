@@ -32,7 +32,7 @@ computer or a home server, even one with a broken screen.
 | HDMI audio | ✅ | Sound on the external monitor |
 | Speaker | ✅ | Both amplifiers via the ABOX DSP; volume capped |
 | Headphone jack | ✅ | CS47L93 codec; no jack detection yet |
-| Microphones | ❌ | Not done yet |
+| Microphones | ✅ | Both internal mics; headset mic not yet |
 | USB device mode | ✅ | Serial console and network to a PC over one cable |
 | Battery telemetry | ✅ | Charge, voltage, current and temperature |
 | Charging | ✅ | MAX77705, up to 3 A; reaches 100 % |
@@ -169,7 +169,7 @@ Liked the project? you might want to buy me a coffee, I'll be very grateful!
   empty (around 5 %) the adapter no longer negotiates power and the monitor and
   hub stay dark. Charge the phone, or use an adapter with a USB-C PD input.
 - The speaker runs without Samsung's DSM protection, so its volume is capped.
-- No headphone jack detection and no microphones yet.
+- No headphone jack detection and no headset microphone yet.
 - The audio DSP boots once per phone boot; reloading its module needs a reboot.
 
 More in [docs/06-known-issues.md](docs/06-known-issues.md).

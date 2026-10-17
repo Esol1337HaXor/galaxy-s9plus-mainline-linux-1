@@ -6,6 +6,10 @@
  *                       Cirrus CS47L93 AIF1 -> HPOUT2 (headset jack)
  *   PCM 1 "Speaker":    RDMA1 -> SPUS IN1 -> SIFS1 -> UAIF1 (I2S) ->
  *                       two MAX98512 (left 0x39, right 0x3a)
+ *   PCM 0 capture:      CS47L93 IN3L/IN3R (the two PDM microphones on the
+ *                       IN1AR pins) -> AIF1 TX -> UAIF0 MIC -> NSRC0 ->
+ *                       SPUM -> SIFM0 -> WDMA1 (vendor DAPM: "WDMA1 Capture"
+ *                       <- SIFM0 <- SPUM ASRC1 <- NSRC0 <- UAIF0)
  *
  * The RDMA side follows the vendor abox_rdma.c message sequence; routing and
  * UAIF registers are written directly, as the vendor DAPM/abox_if.c do
@@ -56,18 +60,29 @@
 #define UAIF_CTRL1(n)		(0x0504 + 0x10 * (n))
 #define RDMA_STATUS(n)		(0x1030 + 0x100 * (n))
 #define  RDMA_PROGRESS		BIT(31)
+#define WDMA_STATUS(n)		(0x2030 + 0x100 * (n))	/* same layout as RDMA_STATUS */
+#define ROUTE_CTRL1		0x0044		/* NSRCx source, 4 bits each */
+#define  ROUTE_NSRC_UAIF0	8
+#define SPUM_CTRL0		0x0300		/* per NSRC: OUT b3 (0 WDMA), ASRC b0, from bit 4 */
+#define SPUM_CTRL3		0x030c
+#define  SIFM0_FLUSH		BIT(0)
+#define  UAIF_DATA_MODE		BIT(4)		/* capture setup, as vendor abox_if.c */
+#define  UAIF_IRQ_MODE		BIT(3)
+#define  UAIF_MIC_ENABLE	BIT(1)
 
 #define FMT_S16_STEREO		0x09	/* abox_get_format(16, 2) = (ch-1) | 1 << 3 */
 
-enum { PATH_HP, PATH_SPK, NUM_PATHS };
+enum { PATH_HP, PATH_SPK, PATH_MIC, NUM_PATHS };
 
 static const struct path_cfg {
 	const char *name;
-	int rdma, uaif;
+	int rdma, uaif;		/* rdma: the RDMA, or for capture the WDMA */
 	bool mixer;		/* SIFS0 (mixer) or SIFS1 (mux) */
+	bool capture;
 } paths[NUM_PATHS] = {
 	[PATH_HP]  = { "Headphones", 0, 0, true },
 	[PATH_SPK] = { "Speaker",    1, 1, false },
+	[PATH_MIC] = { "Microphone", 1, 0, false, true },
 };
 
 static struct path_state {
@@ -96,6 +111,9 @@ static int path_of(struct snd_pcm_substream *ss)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(ss);
 
+	/* the capture side of the headphone link is the microphone */
+	if (ss->stream == SNDRV_PCM_STREAM_CAPTURE)
+		return PATH_MIC;
 	return snd_soc_rtd_to_cpu(rtd, 0)->id;
 }
 
@@ -104,7 +122,7 @@ static int ipc_pcm(int path, int msgtype,
 {
 	struct s9p_abox_ipc_msg m = {};
 
-	m.ipcid = IPC_PCMPLAYBACK;
+	m.ipcid = paths[path].capture ? IPC_PCMCAPTURE : IPC_PCMPLAYBACK;
 	m.task_id = paths[path].rdma;
 	m.msg.pcmtask.msgtype = msgtype;
 	m.msg.pcmtask.channel_id = paths[path].rdma;
@@ -125,12 +143,12 @@ static int ipc_config(int msgtype, int p1, int p2)
 }
 
 /* IRQ/poll context, from s9p-abox */
-static void abox_period(void *data, int rdma, s64 pointer)
+static void dma_period(bool capture, int dma, s64 pointer)
 {
 	int i;
 
 	for (i = 0; i < NUM_PATHS; i++) {
-		if (paths[i].rdma != rdma || !st[i].ss)
+		if (paths[i].capture != capture || paths[i].rdma != dma || !st[i].ss)
 			continue;
 		/*
 		 * RDMAx_BUF_EMPTY SGI: no pointer in it; as the vendor, clear the
@@ -139,6 +157,16 @@ static void abox_period(void *data, int rdma, s64 pointer)
 		st[i].pointer = pointer >= 0 ? pointer : 0;
 		snd_pcm_period_elapsed(st[i].ss);
 	}
+}
+
+static void abox_period(void *data, int rdma, s64 pointer)
+{
+	dma_period(false, rdma, pointer);
+}
+
+static void abox_wdma_period(void *data, int wdma, s64 pointer)
+{
+	dma_period(true, wdma, pointer);
 }
 
 static void abox_ipc_msg(void *data, const struct s9p_abox_ipc_msg *m)
@@ -150,6 +178,7 @@ static void abox_ipc_msg(void *data, const struct s9p_abox_ipc_msg *m)
 
 static const struct s9p_abox_ops abox_ops = {
 	.rdma_period = abox_period,
+	.wdma_period = abox_wdma_period,
 	.ipc = abox_ipc_msg,
 };
 
@@ -235,7 +264,9 @@ static int pcm_hw_params(struct snd_soc_component *c, struct snd_pcm_substream *
 	dma_addr_t pa;
 	void *va;
 
-	va = s9p_abox_rdma_buffer(paths[path].rdma, &pa, &s->iova);
+	va = paths[path].capture ?
+	     s9p_abox_wdma_buffer(paths[path].rdma, &pa, &s->iova) :
+	     s9p_abox_rdma_buffer(paths[path].rdma, &pa, &s->iova);
 	if (!va)
 		return -ENOMEM;
 	arg.iova = s->iova;
@@ -247,8 +278,11 @@ static int pcm_hw_params(struct snd_soc_component *c, struct snd_pcm_substream *
 	snd_pcm_set_runtime_buffer(ss, b);
 	ss->runtime->dma_bytes = params_buffer_bytes(hp);
 
-	/* SIFS node format and rate, then the RDMA buffer */
-	if (paths[path].mixer)
+	/* SIFS node format and rate (playback), then the DMA buffer */
+	ret = 0;
+	if (paths[path].capture)
+		;	/* UAIF -> NSRC needs no SIFS count (vendor abox_sifs_hw_params) */
+	else if (paths[path].mixer)
 		ret = ipc_config(SET_MIXER_SAMPLE_RATE, params_rate(hp), 0) ?:
 		      ipc_config(SET_MIXER_FORMAT, params_width(hp), params_channels(hp));
 	else
@@ -272,6 +306,14 @@ static void route(int path)
 {
 	const struct path_cfg *pc = &paths[path];
 	u32 sh = 4 * pc->rdma;
+
+	if (pc->capture) {
+		/* NSRC0 <- UAIF0; NSRC0 chain: ASRC off, SIFM0 out to WDMA */
+		rmw(ROUTE_CTRL1, 0xf, ROUTE_NSRC_UAIF0);
+		rmw(SPUM_CTRL0, 0xf << 4, 0);
+		writel(SIFM0_FLUSH, sfr() + SPUM_CTRL3);
+		return;
+	}
 
 	/* SPUS INn = RDMAn, ASRC off, OUTn = SIFS0/SIFS1 */
 	rmw(SPUS_CTRL0, 0xf << sh,
@@ -328,7 +370,9 @@ static snd_pcm_uframes_t pcm_pointer(struct snd_soc_component *c, struct snd_pcm
 	if (s->pointer >= s->iova && s->pointer < s->iova + buf) {
 		pos = s->pointer - s->iova;
 	} else {
-		u32 v = readl(sfr() + RDMA_STATUS(paths[path].rdma));
+		u32 v = readl(sfr() + (paths[path].capture ?
+				      WDMA_STATUS(paths[path].rdma) :
+				      RDMA_STATUS(paths[path].rdma)));
 
 		if (v & RDMA_PROGRESS)
 			pos = ((((v >> 16) & 0x1fff) << 4) + (v & 0x1fff)) % buf;
@@ -365,25 +409,36 @@ static int uaif_hw_params(struct snd_pcm_substream *ss, struct snd_pcm_hw_params
 
 	if (ret)
 		return ret;
-	/* FORMAT [28:24], BCLK_POLARITY b23 (NB_NF), I2S, SLOT_MAX [20:18], SBIT_MAX [17:12] */
+	/* FORMAT [28:24], BCLK_POLARITY b23 (NB_NF), I2S, SLOT_MAX [20:18], SBIT_MAX [17:12];
+	 * shared by both directions, and both run the same fixed format */
 	writel(FMT_S16_STEREO << 24 | BIT(23) | (ch - 1) << 18 | (w - 1) << 12,
 	       sfr() + UAIF_CTRL1(u));
-	rmw(UAIF_CTRL0(u), UAIF_SPK_ENABLE, UAIF_MODE_MASTER);
+	if (ss->stream == SNDRV_PCM_STREAM_CAPTURE)
+		/* never touch SPK_ENABLE here: playback may be running */
+		rmw(UAIF_CTRL0(u), UAIF_IRQ_MODE | UAIF_MIC_ENABLE,
+		    UAIF_MODE_MASTER | UAIF_DATA_MODE);
+	else
+		rmw(UAIF_CTRL0(u), UAIF_SPK_ENABLE, UAIF_MODE_MASTER);
 	return 0;
 }
 
 static int uaif_trigger(struct snd_pcm_substream *ss, int cmd, struct snd_soc_dai *dai)
 {
+	bool cap = ss->stream == SNDRV_PCM_STREAM_CAPTURE;
+	u32 en = cap ? UAIF_MIC_ENABLE : UAIF_SPK_ENABLE;
+
 	if (cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_RESUME ||
 	    cmd == SNDRV_PCM_TRIGGER_PAUSE_RELEASE)
-		rmw(UAIF_CTRL0(paths[dai->id].uaif), 0, UAIF_SPK_ENABLE);
+		rmw(UAIF_CTRL0(paths[dai->id].uaif), 0, en);
+	else if (cap)	/* as the vendor: MIC off at stop, SPK only at shutdown */
+		rmw(UAIF_CTRL0(paths[dai->id].uaif), en, 0);
 	return 0;
 }
 
 static void uaif_shutdown(struct snd_pcm_substream *ss, struct snd_soc_dai *dai)
 {
-	/* as the vendor: off at shutdown, not at trigger stop */
-	rmw(UAIF_CTRL0(paths[dai->id].uaif), UAIF_SPK_ENABLE, 0);
+	rmw(UAIF_CTRL0(paths[dai->id].uaif),
+	    ss->stream == SNDRV_PCM_STREAM_CAPTURE ? UAIF_MIC_ENABLE : UAIF_SPK_ENABLE, 0);
 }
 
 static int uaif_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
@@ -418,7 +473,25 @@ static const struct snd_soc_dai_ops uaif_ops = {
 	}
 
 static struct snd_soc_dai_driver uaif_dais[] = {
-	UAIF_DAI(PATH_HP, "s9p-abox-uaif0", "UAIF0 Playback"),
+	{
+		.id = PATH_HP,
+		.name = "s9p-abox-uaif0",
+		.playback = {
+			.stream_name = "UAIF0 Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_48000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		},
+		.capture = {
+			.stream_name = "UAIF0 Capture",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_48000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		},
+		.ops = &uaif_ops,
+	},
 	UAIF_DAI(PATH_SPK, "s9p-abox-uaif1", "UAIF1 Playback"),
 };
 
@@ -477,7 +550,7 @@ static struct snd_soc_dai_link links[] = {
 		.stream_name = "Headphones",
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
 		.init = hp_init,
-		.playback_only = 1,
+		/* playback: headphones; capture: the internal microphones */
 		SND_SOC_DAILINK_REG(hp),
 	},
 	{
@@ -491,11 +564,21 @@ static struct snd_soc_dai_link links[] = {
 
 static const struct snd_soc_dapm_widget card_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone", NULL),
+	SND_SOC_DAPM_MIC("Internal Mic", NULL),
 };
 
+/*
+ * Stock routing (samsung,routing of the sound node): DMIC1 (main, bottom)
+ * on IN3L with MICBIAS1A, DMIC3 on IN3R with MICBIAS1C. On the CS47L92/93
+ * IN3 is the PDM input on the IN1AR pins, so both microphones share them.
+ */
 static const struct snd_soc_dapm_route card_routes[] = {
 	{ "Headphone", NULL, "HPOUT2L" },
 	{ "Headphone", NULL, "HPOUT2R" },
+	{ "IN1ARN", NULL, "Internal Mic" },
+	{ "IN1ARP", NULL, "Internal Mic" },
+	{ "Internal Mic", NULL, "MICBIAS1A" },
+	{ "Internal Mic", NULL, "MICBIAS1C" },
 };
 
 static struct snd_soc_card card = {

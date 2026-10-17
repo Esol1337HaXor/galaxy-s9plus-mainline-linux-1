@@ -216,6 +216,49 @@ static u32 bank_phandle(const char *path)
 	return ph;
 }
 
+/*
+ * The codec's AIF1 pins (its gpio5-8) come out of reset as GPIO inputs.
+ * Playback works anyway -- the AIF block still sees BCLK, LRCLK and RXDAT --
+ * but AIF1TXDAT never drives the line, so the microphones recorded silence.
+ * The stock DT selects the "aif1" function through the codec's default
+ * pinctrl state (cs47l93-gpio-defaults); the same state is built here.
+ */
+static int codec_pin_defaults(struct device_node *codec)
+{
+	struct device_node *defs, *aif1, *n;
+	struct property *p;
+	u32 max = 0, ph;
+	__be32 be;
+
+	defs = of_changeset_create_node(cs, codec, "cs47l93-gpio-defaults");
+	if (!defs)
+		return -ENOMEM;
+	aif1 = of_changeset_create_node(cs, defs, "aif1");
+	if (!aif1)
+		return -ENOMEM;
+	for (n = of_find_all_nodes(NULL); n; n = of_find_all_nodes(n))
+		max = max(max, n->phandle);
+	ph = max + 1;
+	/*
+	 * The phandle has to be a property of the node when the changeset
+	 * attaches it: __of_attach_node() takes np->phandle from it, and the
+	 * changeset's own property entries are only applied afterwards (it
+	 * read 0 that way, and pinctrl-0 was an "invalid phandle").
+	 */
+	be = cpu_to_be32(ph);
+	p = mkprop("phandle", &be, sizeof(be));
+	if (!p)
+		return -ENOMEM;
+	p->next = defs->properties;
+	defs->properties = p;
+	defs->phandle = ph;
+	return STR(aif1, "groups", "aif1") ?:
+	       STR(aif1, "function", "aif1") ?:
+	       prop(aif1, "bias-bus-hold", "", 0) ?:
+	       STR(codec, "pinctrl-names", "default") ?:
+	       u32s(codec, "pinctrl-0", &ph, 1);
+}
+
 static int add_nodes(void)
 {
 	struct device_node *soc, *stub, *spi, *codec, *i2c;
@@ -278,7 +321,12 @@ static int add_nodes(void)
 		      u32s(codec, "#gpio-cells", (u32[]){ 2 }, 1) ?:
 		      u32s(codec, "#sound-dai-cells", (u32[]){ 1 }, 1) ?:
 		      u32s(codec, "reset-gpios", (u32[]){ gpg1, 0, 0 }, 3) ?:
+		      /* stock: the PDM microphones on IN2-IN4 take MICBIAS1 as I/O reference */
+		      u32s(codec, "cirrus,dmic-ref", (u32[]){ 0, 1, 1, 1 }, 4) ?:
 		      STR(codec, "status", "okay");
+		if (ret)
+			goto destroy;
+		ret = codec_pin_defaults(codec);
 		if (ret)
 			goto destroy;
 	}

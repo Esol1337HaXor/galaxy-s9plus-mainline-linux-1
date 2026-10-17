@@ -159,6 +159,8 @@ struct s9p_abox {
 	dma_addr_t vss_pa, vparam_pa;
 	void *rdma[S9P_ABOX_RDMA_MAX];	/* 1 MiB each, on demand */
 	dma_addr_t rdma_pa[S9P_ABOX_RDMA_MAX];
+	void *wdma[S9P_ABOX_WDMA_MAX];	/* capture, 1 MiB each, on demand */
+	dma_addr_t wdma_pa[S9P_ABOX_WDMA_MAX];
 
 	spinlock_t tx_lock;		/* the single TX mailbox */
 	wait_queue_head_t wq;
@@ -333,6 +335,11 @@ static int abox_drain(struct s9p_abox *a, int budget)
 				a->ops.rdma_period(a->ops_data, id - RDMA0_BUF_EMPTY, -1);
 			continue;
 		}
+		if (id == WDMA0_BUF_FULL || id == WDMA1_BUF_FULL) {
+			if (a->ops.wdma_period)
+				a->ops.wdma_period(a->ops_data, id - WDMA0_BUF_FULL, -1);
+			continue;
+		}
 		memcpy_fromio(&m, a->sram + IPC_RX, sizeof(m));
 		writel(0, a->sram + IPC_RX_ACK);
 		switch (m.ipcid) {
@@ -342,6 +349,13 @@ static int abox_drain(struct s9p_abox *a, int budget)
 		case IPC_PCMPLAYBACK:
 			if (m.msg.pcmtask.msgtype == PCM_PLTDAI_POINTER && a->ops.rdma_period)
 				a->ops.rdma_period(a->ops_data, m.msg.pcmtask.channel_id,
+						   m.msg.pcmtask.param.pointer);
+			else if (a->ops.ipc)
+				a->ops.ipc(a->ops_data, &m);
+			break;
+		case IPC_PCMCAPTURE:
+			if (m.msg.pcmtask.msgtype == PCM_PLTDAI_POINTER && a->ops.wdma_period)
+				a->ops.wdma_period(a->ops_data, m.msg.pcmtask.channel_id,
 						   m.msg.pcmtask.param.pointer);
 			else if (a->ops.ipc)
 				a->ops.ipc(a->ops_data, &m);
@@ -415,6 +429,25 @@ void *s9p_abox_rdma_buffer(unsigned int id, dma_addr_t *pa, u32 *iova)
 	return a->rdma[id];
 }
 EXPORT_SYMBOL_GPL(s9p_abox_rdma_buffer);
+
+/* WDMA n (capture) buffer: 1 MiB at IOVA 0x92000000 + n MiB (vendor IOVA_WDMA_BUFFER) */
+void *s9p_abox_wdma_buffer(unsigned int id, dma_addr_t *pa, u32 *iova)
+{
+	struct s9p_abox *a = the_abox;
+
+	if (!a || id >= S9P_ABOX_WDMA_MAX)
+		return NULL;
+	if (!a->wdma[id]) {
+		a->wdma[id] = alloc_mb(a, SZ_1M, &a->wdma_pa[id]);
+		if (!a->wdma[id])
+			return NULL;
+		mmu_map(a, S9P_ABOX_IOVA_WDMA(id), a->wdma_pa[id], SZ_1M);
+	}
+	*pa = a->wdma_pa[id];
+	*iova = S9P_ABOX_IOVA_WDMA(id);
+	return a->wdma[id];
+}
+EXPORT_SYMBOL_GPL(s9p_abox_wdma_buffer);
 
 /*
  * UAIF bit clock: AUDIF = PLL_AUD (1179.648 MHz) / 16 = 73.728 MHz, as the
