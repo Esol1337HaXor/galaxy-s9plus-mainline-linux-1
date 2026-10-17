@@ -23,6 +23,10 @@ the wrong container for an RGB LED and oopsed, wrote the times to the ramp
 register (the mainline header has LEDBLNK at 0x36; it is 0x38) and never
 switched the channels to blink mode. This copy fixes all three.
 
+The PMIC stays powered from the battery, so the LED keeps its last state when
+Linux is gone: after a power off it stayed lit, even through the next boot's
+bootloader. The driver puts it out on power off and reboot.
+
 Options in `/etc/modprobe.d/s9p-leds.conf`: the default trigger
 (`s9p_leds trigger=...`, empty for none) and the current at full brightness
 (`leds_max77705 max_current=20`, 1..255). Needs `scripts/build/build_extras.sh`.

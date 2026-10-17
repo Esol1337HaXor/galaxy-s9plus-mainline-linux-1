@@ -20,6 +20,10 @@
  * numbers the registers without gaps (LEDRMP 0x35, LEDBLNK 0x36), while the
  * chip, as Samsung's driver for this phone has it, keeps LEDRMP at 0x36 and
  * LEDBLNK at 0x38: blink times landed in the ramp register.
+ *
+ * The PMIC runs from the battery, so whatever the LED shows outlives Linux:
+ * after a power off it stayed lit until the next boot reached this driver.
+ * Shutdown and reboot now put it out.
  */
 
 #include <linux/i2c.h>
@@ -302,6 +306,8 @@ static int max77705_led_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return dev_err_probe(dev, PTR_ERR(regmap), "Failed to register LEDs regmap\n");
 
+	platform_set_drvdata(pdev, regmap);
+
 	device_for_each_child_node_scoped(dev, child) {
 		ret = max77705_add_led(dev, regmap, child);
 		if (ret)
@@ -309,6 +315,17 @@ static int max77705_led_probe(struct platform_device *pdev)
 	}
 
 	return 0;
+}
+
+/* every channel off and no blinking: the LED is dark until Linux lights it */
+static void max77705_led_shutdown(struct platform_device *pdev)
+{
+	struct regmap *regmap = platform_get_drvdata(pdev);
+
+	if (!regmap)
+		return;
+	regmap_write(regmap, MAX77705_RGBLED_REG_LEDEN, 0);
+	regmap_write(regmap, MAX77705_LED_REG_LEDBLNK, 0);
 }
 
 static const struct of_device_id max77705_led_of_match[] = {
@@ -323,6 +340,7 @@ static struct platform_driver max77705_led_driver = {
 		.of_match_table = max77705_led_of_match,
 	},
 	.probe = max77705_led_probe,
+	.shutdown = max77705_led_shutdown,
 };
 module_platform_driver(max77705_led_driver);
 
