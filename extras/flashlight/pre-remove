@@ -1,0 +1,6 @@
+#!/bin/sh
+# Remove the module (it turns the torch off as it goes).
+K=$(uname -r)
+modprobe -r s9p-flash 2>/dev/null || true
+rm -rf "/lib/modules/$K/extra/s9p-flash" /var/lib/s9p-extras/flashlight
+depmod -a "$K"

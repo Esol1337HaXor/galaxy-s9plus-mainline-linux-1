@@ -151,6 +151,7 @@ sudo extras/install.sh audio --remove     # take a feature out again
 | [power-button](extras/power-button/) | Short press locks and blanks, long press opens the power menu |
 | [power-profiles](extras/power-profiles/) | Three CPU/GPU/Wi-Fi profiles, following GNOME's power mode |
 | [uinput](extras/uinput/) | `/dev/uinput` for virtual input devices (Galaxy Companion's button actions) |
+| [flashlight](extras/flashlight/) | The rear flash LED as a torch |
 | [flight-recorder](extras/flight-recorder/) | Kernel log and a state line per minute, fsync'ed, for hunting hangs |
 | [usb-apt-proxy](extras/usb-apt-proxy/) | apt through a proxy on the PC the phone is cabled to |
 | [debug-tools](extras/debug-tools/) | Register, PMIC and clock tools; `s9p-cpu-validate` for CPU load tests |

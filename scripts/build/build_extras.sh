@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the optional modules of extras/usb-c-display, extras/audio,
 # extras/notification-led, extras/bluetooth, extras/vibration, extras/microsd, extras/low-power
-# and extras/uinput
+# extras/uinput and extras/flashlight
 # for the kernel that
 # build_stable.sh produced.
 #
@@ -106,7 +106,7 @@ sed -i 's|"../input-compat.h"|"input-compat.h"|' "$WORK/uinput/uinput.c"
 echo 'obj-m += uinput.o' > "$WORK/uinput/Makefile"
 $K O=out M="$WORK/uinput" CONFIG_INPUT_UINPUT=m modules
 
-for d in leds haptic sdcard power modem; do
+for d in leds haptic sdcard power modem flash; do
 	echo "=== src/$d ==="
 	rm -rf "$WORK/$d-src"; cp -r "$PROJ/src/$d" "$WORK/$d-src"
 	$K O=out-extras M="$WORK/$d-src" modules
@@ -121,7 +121,7 @@ clang --target=aarch64-linux-android29 -O2 -fPIC -shared -nostdlib -fuse-ld=lld 
 	-o "$WORK/s9p-noselinux.so" "$PROJ/src/modem/userspace/s9p-noselinux.c"
 
 OUT="$PROJ/dist/extras/$KREL"
-rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds,bluetooth,haptic,sdcard,power,modem,input}
+rm -rf "$OUT"; mkdir -p "$OUT"/{kernel,usbc-dp,sound,hid,alsa,madera,leds,bluetooth,haptic,sdcard,power,modem,input,flash}
 # =m in the stable kernel, needed by the extras (the image installs no modules)
 cp out/drivers/gpu/drm/display/drm_display_helper.ko out/drivers/media/cec/core/cec.ko \
    out/drivers/leds/led-class-multicolor.ko out/drivers/input/ff-memless.ko \
@@ -135,6 +135,7 @@ find "$M" -name '*.ko' -exec cp {} "$OUT/madera/" \;
 cp "$WORK"/leds-src/*.ko "$OUT/leds/"
 cp "$WORK"/haptic-src/*.ko "$OUT/haptic/"
 cp "$WORK"/uinput/uinput.ko "$OUT/input/"
+cp "$WORK"/flash-src/*.ko "$OUT/flash/"
 cp "$WORK"/sdcard-src/*.ko "$WORK"/exfat/exfat.ko "$OUT/sdcard/"
 cp "$WORK"/power-src/*.ko "$OUT/power/"
 cp "$WORK"/modem-src/*.ko "$WORK/s9p-noselinux.so" "$OUT/modem/"

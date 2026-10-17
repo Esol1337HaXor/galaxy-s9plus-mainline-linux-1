@@ -242,7 +242,7 @@ static int add_bus(struct device_node *soc, const char *name, u32 base, u32 spi,
 
 static int add_nodes(void)
 {
-	struct device_node *soc, *stub;
+	struct device_node *soc, *stub, *bus = NULL;
 	int ret;
 
 	soc = of_find_node_by_path("/soc@0");
@@ -257,7 +257,9 @@ static int add_nodes(void)
 		goto out;
 	}
 	of_changeset_init(cs);
-	ret = add_bus(soc, "i2c@10920000", 0x10920000, 436, stub->phandle) ?:
+	/* s9p-flash (extras/flashlight) adds the S2MPB02's bus at boot */
+	bus = of_find_node_by_path("/soc@0/i2c@10920000");
+	ret = (bus ? 0 : add_bus(soc, "i2c@10920000", 0x10920000, 436, stub->phandle)) ?:
 	      add_bus(soc, "i2c@108f0000", 0x108f0000, 433, stub->phandle) ?:
 	      add_bus(soc, "i2c@10900000", 0x10900000, 434, stub->phandle) ?:
 	      of_changeset_apply(cs);
@@ -269,6 +271,7 @@ static int add_nodes(void)
 	}
 	pr_info("s9p-cam: added i2c@10920000 (S2MPB02), i2c@108f0000 (front sensor), i2c@10900000 (front AF/EEPROM)\n");
 out:
+	of_node_put(bus);
 	of_node_put(soc);
 	of_node_put(stub);
 	return ret;

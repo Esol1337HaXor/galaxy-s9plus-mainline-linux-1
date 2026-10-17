@@ -109,7 +109,7 @@ system ([`image/common/README.md`](../image/common/README.md)), and
 | `gdm.service.d/10-wait-for-render-node.conf` | GDM waits for the GPU's render node |
 | `PAN_MAX_AFBC_PACKING_RATIO=0` in `/etc/environment` | Mesa texture fix, see below |
 
-| `s9p-hardware-setup` + service | **first boot: the hardware features** of [`extras/defaults`](../extras/defaults) — external display and USB host, audio, notification LED, Bluetooth, vibration, microSD, low power, power button, power profiles, `/dev/uinput`, modem and mobile data — then one reboot |
+| `s9p-hardware-setup` + service | **first boot: the hardware features** of [`extras/defaults`](../extras/defaults) — external display and USB host, audio, notification LED, Bluetooth, vibration, microSD, low power, power button, power profiles, `/dev/uinput`, flashlight, modem and mobile data — then one reboot |
 
 The image carries those features, the modules built for them (`dist/extras`,
 from `scripts/build/build_extras.sh`, so build that before the image) and
