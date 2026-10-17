@@ -28,8 +28,7 @@ computer or a home server, even one with a broken screen.
 | Wi-Fi | ✅ | BCM4361 (`brcmfmac`) |
 | Bluetooth | ✅ | BCM4361 over UART, in GNOME Settings |
 | USB-C DisplayPort | ✅ | External monitor up to 1080p60, hot-plug |
-| USB host | ✅ | Keyboards, mice and storage on the adapter's hub |
-| USB Ethernet | 🟡 | Realtek, ASIX, Microchip and CDC drivers built in; untested |
+| USB host | ✅ | Keyboards, mice and storage on the hub; Ethernet adapters untested |
 | HDMI audio | ✅ | Sound on the external monitor |
 | Speaker | ✅ | Both amplifiers via the ABOX DSP; volume capped |
 | Headphone jack | ✅ | CS47L93 codec; no jack detection yet |
@@ -39,13 +38,9 @@ computer or a home server, even one with a broken screen.
 | Charging | ✅ | MAX77705, up to 3 A; reaches 100 % |
 | Vibration | ✅ | Force-feedback device, used by feedbackd |
 | Notification LED | ✅ | Orange while charging, green when full |
-| Power button | 🟡 | Short press locks, long press power menu; untested on the button |
+| Buttons | ✅ | Power and volume keys; short press locks, long press power menu |
 | CPU scaling | ✅ | Both clusters follow the load; thermal and battery caps |
-| Containers | 🟡 | Kernel passes Docker's check-config; Docker not yet run |
-| Reboot and watchdog | ✅ | Clean reboots reliable; a crash restarts Ubuntu on its own |
-| Idle power | 🟡 | Memory DVFS, unused blocks off; about 1.5 W idle |
-| Deep CPU idle | 🟡 | Works on 1-2 cores, hangs with more; not shipped |
-| Suspend / resume | ❌ | Needs deep CPU idle first |
+| Power management | 🟡 | Memory DVFS, unused blocks off; no deep CPU idle or suspend yet |
 | Cameras | 🟡 | Front sensor answers on I2C; no image yet |
 | Mobile network | ❌ | Needs Samsung's RIL; only studied |
 | Fingerprint reader | ❓ | Not tested |
