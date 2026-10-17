@@ -42,7 +42,7 @@ computer or a home server, even one with a broken screen.
 | CPU scaling | ✅ | Both clusters follow the load; thermal and battery caps |
 | Power management | 🟡 | Memory DVFS, unused blocks off; no deep CPU idle or suspend yet |
 | Cameras | 🟡 | Front sensor answers on I2C; no image yet |
-| Mobile network | ❌ | Needs Samsung's RIL; only studied |
+| Mobile network | 🟡 | Modem boots; no RIL yet (no SIM, calls or data) |
 | Fingerprint reader | ❓ | Not tested |
 | Motion sensors | ❓ | Not tested |
 
@@ -206,6 +206,7 @@ More in [docs/06-known-issues.md](docs/06-known-issues.md).
 | [Vibration](docs/12-vibration.md) | PWM timer and the MAX77705 haptic driver |
 | [Cameras](docs/13-cameras.md) | Work in progress: sensors, CSIS and the plan |
 | [microSD](docs/14-microsd.md) | The DWMMC2 slot, its rails and UHS-I |
+| [Modem](docs/15-modem.md) | Booting the Shannon CP with Samsung's cbd |
 
 ## Repository layout
 

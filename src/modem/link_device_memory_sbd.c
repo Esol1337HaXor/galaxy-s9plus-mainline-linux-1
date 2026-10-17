@@ -342,7 +342,7 @@ static u8* data_offset_to_buffer(u64 offset, struct sbd_ring_buffer *rb)
 		mif_err("kfifo_avail:%d\n", kfifo_avail(&zdptr->fifo));
 		return NULL;
 	}
-	dma_unmap_single(dev, dma_addr, MIF_BUFF_DEFAULT_CELL_SIZE, DMA_FROM_DEVICE);
+	/* s9p: ZMB is mapped write-combined (uncached), nothing was mapped */
 
 	return buf;
 }
@@ -787,8 +787,7 @@ static int setup_zerocopy_adaptor(struct sbd_ipc_device *ipc_dev)
 
 		while (kfifo_out_spinlocked(&zdptr->fifo, &dma_addr, sizeof(dma_addr),
 						&zdptr->lock_kfifo) == sizeof(dma_addr)) {
-			dma_unmap_single(dev, dma_addr, MIF_BUFF_DEFAULT_CELL_SIZE,
-									DMA_FROM_DEVICE);
+			/* s9p: nothing to unmap, see buffer_to_data_offset */
 		}
 
 		kfifo_free(&zdptr->fifo);
@@ -1337,7 +1336,13 @@ static u64 buffer_to_data_offset(u8* buf, struct sbd_ring_buffer *rb)
 		return -EINVAL;
 	}
 
-	dma_addr = dma_map_single(dev, buf, MIF_BUFF_DEFAULT_CELL_SIZE, DMA_FROM_DEVICE);
+	/*
+	 * s9p: the vendor maps the cell for cache maintenance only. ZMB is a
+	 * carveout mapped write-combined (shm_ipc), so it is never cached and
+	 * the DMA API refuses the vmalloc-range address anyway; the fifo keeps
+	 * its one entry per cell.
+	 */
+	dma_addr = 0;
 	kfifo_in_spinlocked(&zdptr->fifo, &dma_addr, sizeof(dma_addr), &zdptr->lock_kfifo);
 
 	return offset;

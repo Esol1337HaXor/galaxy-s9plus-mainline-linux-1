@@ -1,0 +1,5 @@
+# cbd drops to Android's radio user (uid 1001) and keeps gid 0, so the CP
+# devices and the firmware partition are owned by that uid (ueventd.rc gives
+# umts_* to system:radio 0660, which only works with Android's groups).
+KERNEL=="umts_*", OWNER="1001", GROUP="1001", MODE="0660"
+SUBSYSTEM=="block", ENV{ID_PART_ENTRY_NAME}=="RADIO", OWNER="1001", MODE="0400"

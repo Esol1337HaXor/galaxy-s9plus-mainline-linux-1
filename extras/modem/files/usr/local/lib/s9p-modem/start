@@ -1,0 +1,34 @@
+#!/bin/sh
+# Boot the CP (Shannon modem) with Samsung's own cbd, from the phone's Android
+# partitions: SYSTEM and VENDOR as a read-only chroot, the modem firmware from
+# RADIO, the NV data from EFS (read-only).
+set -eu
+R=/run/s9p-modem/android
+# install.sh starts the unit before post-install has put the module in place
+modprobe s9p-modem 2>/dev/null || { echo "s9p-modem module not installed" >&2; exit 0; }
+[ -e /dev/umts_boot0 ] || udevadm settle
+
+mkdir -p $R
+mountpoint -q $R || mount -o ro /dev/disk/by-partlabel/SYSTEM $R
+mountpoint -q $R/vendor || mount -o ro /dev/disk/by-partlabel/VENDOR $R/vendor
+# Android 10 runs bionic and its libraries from APEX; flattened ones are
+# directories under /system/apex
+mountpoint -q $R/apex || mount -t tmpfs -o mode=755 tmpfs $R/apex
+for a in $R/system/apex/*; do
+	n=$(basename "$a"); n=${n%.release}
+	mkdir -p "$R/apex/$n"
+	mountpoint -q "$R/apex/$n" || mount --bind "$a" "$R/apex/$n"
+done
+for d in dev proc sys; do mountpoint -q $R/$d || mount --rbind /$d $R/$d; done
+mountpoint -q $R/mnt || mount -t tmpfs -o mode=755 tmpfs $R/mnt
+mkdir -p $R/mnt/vendor/efs
+mountpoint -q $R/mnt/vendor/efs || mount -o ro /dev/disk/by-partlabel/EFS $R/mnt/vendor/efs
+
+# cbd opens the firmware by its Android name
+B=/dev/block/platform/11120000.ufs/by-name
+mkdir -p $B
+ln -sf "$(readlink -f /dev/disk/by-partlabel/RADIO)" $B/RADIO
+
+# as init.baseband.rc; cbd boots the CP once and exits ("Cp boot Oneshot")
+exec chroot $R /vendor/bin/cbd -tss310 -bm -mm \
+	-P platform/11120000.ufs/by-name/RADIO -n /mnt/vendor/efs

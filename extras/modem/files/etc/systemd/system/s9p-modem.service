@@ -1,0 +1,13 @@
+[Unit]
+Description=Galaxy S9+ modem (CP) boot
+After=local-fs.target systemd-udevd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/s9p-modem/start
+ExecStop=/usr/local/lib/s9p-modem/stop
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

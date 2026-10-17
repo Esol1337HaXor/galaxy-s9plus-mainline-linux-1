@@ -1,0 +1,8 @@
+#!/bin/sh
+# Undo the chroot of start (the CP itself keeps running until the reboot).
+R=/run/s9p-modem/android
+for d in sys proc dev; do umount -R $R/$d 2>/dev/null; done
+umount $R/mnt/vendor/efs $R/mnt 2>/dev/null
+for m in $R/apex/*; do umount "$m" 2>/dev/null; done
+umount $R/apex $R/vendor $R 2>/dev/null
+exit 0

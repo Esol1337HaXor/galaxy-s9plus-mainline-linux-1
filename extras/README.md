@@ -23,5 +23,6 @@ sudo extras/install.sh power-profiles --remove
 | [vibration](vibration/) | the vibration motor (force feedback) and feedbackd. Needs `scripts/build/build_extras.sh` |
 | [microsd](microsd/) | the microSD slot (UHS-I SDR104, hot-plug) and exFAT. Needs `scripts/build/build_extras.sh` |
 | [low-power](low-power/) | idle power: memory clock follows the load, unused SoC blocks powered off (~240 mW). Needs `scripts/build/build_extras.sh` |
+| [modem](modem/) | boots the Shannon modem with Samsung's cbd from the phone's own partitions; experimental, no RIL yet. Needs `scripts/build/build_extras.sh` |
 | [power-button](power-button/) | power button as on a phone: short press locks and turns the screen off, long press opens the power off dialog |
 | [debug-tools](debug-tools/) | register, PMIC and clock tools used to bring the port up; test-run reboot helper; the old userspace governor |

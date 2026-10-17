@@ -1,0 +1,19 @@
+#!/bin/sh
+# Install the module built by scripts/build/build_extras.sh and check that
+# the Android partitions cbd needs are there.
+set -eu
+D=$(cd "$(dirname "$0")" && pwd)
+K=$(uname -r)
+SRC=$D/../../dist/extras/$K
+[ -f "$SRC/SHA256SUMS" ] || { echo "no modules for kernel $K in dist/extras: run scripts/build/build_extras.sh" >&2; exit 1; }
+(cd "$SRC" && sha256sum -c --quiet SHA256SUMS) || { echo "dist/extras/$K: checksum mismatch" >&2; exit 1; }
+for p in SYSTEM VENDOR RADIO EFS; do
+	[ -e "/dev/disk/by-partlabel/$p" ] || { echo "no $p partition: the modem needs the stock Android partitions" >&2; exit 1; }
+done
+install -d "/lib/modules/$K/extra/s9p-modem"
+install -m644 "$SRC"/modem/*.ko "/lib/modules/$K/extra/s9p-modem/"
+mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/modem
+depmod -a "$K"
+udevadm control --reload
+udevadm trigger --subsystem-match=block --subsystem-match=misc
+[ -n "${NO_START:-}" ] || systemctl restart s9p-modem.service
