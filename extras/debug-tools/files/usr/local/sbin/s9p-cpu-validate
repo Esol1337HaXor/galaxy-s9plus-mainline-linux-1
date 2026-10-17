@@ -1,0 +1,99 @@
+#!/bin/sh
+# Validate the CPU operating points under load, with every result checked.
+#
+#   s9p-cpu-validate MODE [SECONDS]      (as root; default 600 s)
+#
+#   little   4 workers on the A55 cores, the M3 cores idle
+#   big1     1 worker on an M3 core: the only case that may run 2704 MHz
+#   big2     2 workers on M3 cores (2327 MHz with boost)
+#   big4     4 workers on the M3 cores (1794 MHz, the busy-core rule)
+#   all      8 CPU workers plus a memory worker (MIF DVFS under load)
+#   switch   load in bursts on all cores while the frequency limits of both
+#            clusters jump at random every 20-200 ms, bottom steps included:
+#            the PLL relock and BUCK2/BUCK3 transitions, thousands of them
+#
+# stress-ng runs with --verify: a wrong result (the first sign of too little
+# voltage) is a failure, not just a slower run. Every 2 s one line goes to
+# the log: both cluster clocks, the three TMU temperatures and the PLL lock
+# timeouts. The log is kept in /var/log/s9p-cpu-validate/ so that a run that
+# ends in a reset still leaves its last lines behind.
+#
+# Run it with the limits you want to validate already set, for example
+# boost (echo 1 > /sys/module/s9p_cpufreq/parameters/boost) or the M3 floor
+# (scaling_min_freq of policy4). The exit status is 0 only if no worker
+# reported a wrong result.
+set -u
+MODE=${1:-}
+SECS=${2:-600}
+P=/sys/module/s9p_cpufreq/parameters
+C=/sys/devices/system/cpu/cpufreq
+command -v stress-ng >/dev/null || { echo "needs stress-ng (apt install stress-ng)" >&2; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
+LOGDIR=/var/log/s9p-cpu-validate
+mkdir -p "$LOGDIR"
+LOG=$LOGDIR/$MODE-$(date +%Y%m%d-%H%M%S).log
+
+case $MODE in
+little)	ARGS="--cpu 4 --taskset 0-3" ;;
+big1)	ARGS="--cpu 1 --taskset 4" ;;
+big2)	ARGS="--cpu 2 --taskset 4-5" ;;
+big4)	ARGS="--cpu 4 --taskset 4-7" ;;
+all)	ARGS="--cpu 8 --vm 1 --vm-bytes 256M" ;;
+switch)	ARGS="--cpu 8 --cpu-load 60 --cpu-load-slice -50" ;;
+*)	sed -n '2,22p' "$0"; exit 2 ;;
+esac
+
+{
+	echo "# $MODE ${SECS}s, kernel $(uname -v)"
+	echo "# boost=$(cat $P/boost) little=$(cat $C/policy0/scaling_min_freq)-$(cat $C/policy0/scaling_max_freq)" \
+		"big=$(cat $C/policy4/scaling_min_freq)-$(cat $C/policy4/scaling_max_freq)"
+} | tee "$LOG"
+
+# shellcheck disable=SC2086
+stress-ng $ARGS --cpu-method all --verify --metrics-brief --timeout "${SECS}s" \
+	>"$LOG.stress" 2>&1 &
+STRESS=$!
+
+SWITCH=
+if [ "$MODE" = switch ]; then
+	(
+		L=$(cat $C/policy0/scaling_available_frequencies)
+		B=$(cat $C/policy4/scaling_available_frequencies)
+		pick() { echo "$1" | tr ' ' '\n' | grep . | shuf -n1; }
+		LMIN0=$(cat $C/policy0/scaling_min_freq) LMAX0=$(cat $C/policy0/scaling_max_freq)
+		BMIN0=$(cat $C/policy4/scaling_min_freq) BMAX0=$(cat $C/policy4/scaling_max_freq)
+		trap 'echo $LMIN0 > $C/policy0/scaling_min_freq; echo $LMAX0 > $C/policy0/scaling_max_freq;
+		      echo $BMIN0 > $C/policy4/scaling_min_freq; echo $BMAX0 > $C/policy4/scaling_max_freq; exit 0' TERM INT
+		while :; do
+			for pol in 0 4; do
+				[ $pol = 0 ] && f=$(pick "$L") || f=$(pick "$B")
+				# min first down, then max, so the pair is always valid
+				echo 0 > $C/policy$pol/scaling_min_freq 2>/dev/null
+				echo "$f" > $C/policy$pol/scaling_max_freq 2>/dev/null
+				echo "$f" > $C/policy$pol/scaling_min_freq 2>/dev/null
+			done
+			sleep "0.$(shuf -i 2-20 -n1 | xargs printf %02d)"
+		done
+	) &
+	SWITCH=$!
+fi
+
+t0=$(date +%s)
+while kill -0 $STRESS 2>/dev/null; do
+	echo "$(( $(date +%s) - t0 ))s L=$(cat $C/policy0/scaling_cur_freq) B=$(cat $C/policy4/scaling_cur_freq)" \
+		"tB=$(cat $P/temp_big) tL=$(cat $P/temp_little) tG=$(cat $P/temp_gpu)" \
+		"pll_timeouts=$(cat $P/pll_lock_timeouts)" >>"$LOG"
+	sync "$LOG" 2>/dev/null
+	sleep 2
+done
+wait $STRESS
+RC=$?
+[ -z "$SWITCH" ] || { kill $SWITCH; wait $SWITCH 2>/dev/null; }
+
+tail -n 3 "$LOG"
+cat "$LOG.stress" >>"$LOG"; rm -f "$LOG.stress"
+FAIL=$(grep -cE "fail: |failed: [1-9]|computation error" "$LOG" || true)
+TRANS=$(cat $C/policy0/stats/total_trans 2>/dev/null)/$(cat $C/policy4/stats/total_trans 2>/dev/null)
+echo "# result: stress-ng exit $RC, $FAIL failure line(s), transitions little/big $TRANS" | tee -a "$LOG"
+echo "log: $LOG"
+[ "$RC" = 0 ] && [ "$FAIL" = 0 ]
