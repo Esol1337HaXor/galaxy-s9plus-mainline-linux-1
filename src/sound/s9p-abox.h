@@ -55,6 +55,7 @@ enum s9p_abox_systemmsg {
 	ABOX_REQUEST_SYSCLK = 7,
 	ABOX_REPORT_LOG = 0x10,
 	ABOX_FLUSH_LOG,
+	ABOX_START_VSS = 0xa0,	/* the CP is online: start the voice firmware */
 };
 
 struct s9p_abox_pcmtask_msg {

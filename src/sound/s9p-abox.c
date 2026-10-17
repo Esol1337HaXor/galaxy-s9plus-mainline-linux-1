@@ -115,9 +115,22 @@
 #define DRAM_FW_SIZE		(SZ_16M + SZ_2M)
 #define IOVA_IVA_FW		0x90000000
 #define IVA_FW_SIZE		SZ_512K
-#define IOVA_VSS_FW		0xa0000000	/* voice (CP shared memory on stock) */
+#define IOVA_VSS_FW		0xa0000000	/* voice firmware, in the CP's memory */
 #define VSS_FW_SIZE		0x700000
 #define IOVA_VSS_PARAM		0xa1000000
+/*
+ * Where cbd puts them (src/modem, DT shmem@f6e00000): the VSS image right
+ * after the CP's own DRAM (0xf0000000 + cp_size 0x7900000), its parameters
+ * after the IPC and zero-copy regions. As vendor abox.c, the ABOX sees them
+ * at the IOVAs above; the firmware starts VSS on ABOX_START_VSS, which the
+ * modem's start-up sends (debugfs start_vss) once the CP is online.
+ */
+#define VSS_FW_PHYS		0xf7900000
+#define VSS_PARAM_PHYS		0xf9000000
+
+static bool vss = true;
+module_param(vss, bool, 0444);
+MODULE_PARM_DESC(vss, "map the CP's voice firmware (VSS) for calls; off: zeroed stand-ins");
 
 static bool boot = true;
 module_param(boot, bool, 0444);
@@ -155,7 +168,7 @@ struct s9p_abox {
 	dma_addr_t dram_pa;
 	void *iva;
 	dma_addr_t iva_pa;
-	void *vss, *vparam;		/* no modem here: zeroed stand-ins */
+	void *vss, *vparam;		/* zeroed stand-ins unless vss (then CP memory) */
 	dma_addr_t vss_pa, vparam_pa;
 	void *rdma[S9P_ABOX_RDMA_MAX];	/* 1 MiB each, on demand */
 	dma_addr_t rdma_pa[S9P_ABOX_RDMA_MAX];
@@ -718,6 +731,26 @@ static int state_show(struct seq_file *s, void *u)
 }
 DEFINE_SHOW_ATTRIBUTE(state);
 
+/* debugfs start_vss: the CP is up, start the voice firmware (vendor abox_modem_notifier) */
+static ssize_t start_vss_write(struct file *f, const char __user *buf, size_t len, loff_t *pos)
+{
+	struct s9p_abox *a = f->private_data;
+	struct s9p_abox_ipc_msg m = { .ipcid = IPC_SYSTEM };
+	int ret;
+
+	if (!vss)
+		return -ENODEV;
+	m.msg.system.msgtype = ABOX_START_VSS;
+	ret = s9p_abox_ipc(&m);
+	alog(a, "start VSS: %d", ret);
+	return ret ?: len;
+}
+
+static const struct file_operations start_vss_fops = {
+	.open = simple_open,
+	.write = start_vss_write,
+};
+
 /* ------------------------------------------------------------------ */
 
 static int map_abox_irq(void)
@@ -773,8 +806,15 @@ static int s9p_abox_probe(struct platform_device *pdev)
 	a->lv1 = dma_alloc_coherent(dev, SZ_16K, &a->lv1_pa, GFP_KERNEL);
 	a->dram = alloc_mb(a, DRAM_FW_SIZE, &a->dram_pa);
 	a->iva = alloc_mb(a, SZ_1M, &a->iva_pa);
-	a->vss = alloc_mb(a, VSS_FW_SIZE, &a->vss_pa);
-	a->vparam = alloc_mb(a, SZ_1M, &a->vparam_pa);
+	if (vss) {
+		/* reserved memory (modem@f0000000), not ours to allocate */
+		a->vss_pa = VSS_FW_PHYS;
+		a->vparam_pa = VSS_PARAM_PHYS;
+		a->vss = a->vparam = (void *)1;
+	} else {
+		a->vss = alloc_mb(a, VSS_FW_SIZE, &a->vss_pa);
+		a->vparam = alloc_mb(a, SZ_1M, &a->vparam_pa);
+	}
 	if (!a->lv1 || !a->dram || !a->iva || !a->vss || !a->vparam || (a->lv1_pa & (SZ_16K - 1)))
 		return dev_err_probe(dev, -ENOMEM, "no memory for the ABOX firmware\n");
 	memset(a->lv1, 0, SZ_16K);
@@ -798,6 +838,7 @@ static int s9p_abox_probe(struct platform_device *pdev)
 	a->dbg = debugfs_create_dir("s9p-abox", NULL);
 	debugfs_create_file("log", 0444, a->dbg, a, &log_fops);
 	debugfs_create_file("state", 0444, a->dbg, a, &state_fops);
+	debugfs_create_file("start_vss", 0200, a->dbg, a, &start_vss_fops);
 	platform_set_drvdata(pdev, a);
 	the_abox = a;
 

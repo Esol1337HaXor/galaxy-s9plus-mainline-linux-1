@@ -34,6 +34,13 @@ for b in binder hwbinder vndbinder; do ln -s binderfs/$b $R/dev/$b; done
 umount -l $R/proc
 mount -t proc proc $R/proc
 mount --bind /dev/null $R/proc/sysrq-trigger
+# the kernel command line Android's init reads its androidboot.* from: the
+# host's, plus S9P_ANDROIDBOOT from /etc/default/s9p-modem (e.g.
+# androidboot.debug_level=0x4948 for Samsung's full RIL log)
+S9P_ANDROIDBOOT=
+[ ! -r /etc/default/s9p-modem ] || . /etc/default/s9p-modem
+echo "$(cat /proc/cmdline) $S9P_ANDROIDBOOT" > $W/cmdline
+mount --bind $W/cmdline $R/proc/cmdline
 mount --bind $R/proc/sys $R/proc/sys
 mount -o remount,bind,ro $R/proc/sys
 # the sysctls init insists on writing and reading back: fakes (all of vm,

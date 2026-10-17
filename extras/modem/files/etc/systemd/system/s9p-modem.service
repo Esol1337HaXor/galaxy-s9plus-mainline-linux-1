@@ -1,6 +1,6 @@
 [Unit]
 Description=Galaxy S9+ modem (CP) boot
-After=local-fs.target systemd-udevd.service
+After=local-fs.target systemd-udevd.service s9p-audio.service
 
 [Service]
 Type=oneshot

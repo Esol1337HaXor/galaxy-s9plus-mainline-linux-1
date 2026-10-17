@@ -4,6 +4,16 @@
 # kernel has no SELinux, and Android refuses to work without it.
 on early-init
     mkdir /dev/socket 0755 root root
+    # libsec-ril takes its log level from here (androidboot.debug_level,
+    # /etc/default/s9p-modem)
+    setprop ro.vendor.boot.debug_level ${ro.boot.debug_level}
+
+    # What Android's telephony sets on a dual-SIM Samsung: the slot carrying
+    # data and calls. Without it libsec-ril ignores the PS registration
+    # ("DDS not match") and rejects every data call.
+    setprop ril.dds.data.slotid 0
+    setprop ril.dds.datacross.slotid 0
+    setprop ril.dds.call.slotid 0
 
 on late-init
     mkdir /data/vendor 0771 root system

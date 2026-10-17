@@ -117,7 +117,34 @@ the network's ringback tone; with 2G only there is no `NET_REGIST` at all.
 Next: decode `NET_REGIST` (registration and reject cause per domain), and
 find what Android's IMS stack or telephony framework normally provides.
 
-## Next
+## What Android's telephony does that has to be done here
+
+Found with Samsung's full RIL log (`androidboot.debug_level=0x4948` in
+`/etc/default/s9p-modem`; libsec-ril reads `ro.vendor.boot.debug_level`
+and then decodes every IPC message it sends and receives):
+
+- **Single or dual SIM.** cbd writes the SIM count (`ro.multisim.simslotcount`
+  of EFS `factory.prop`) to the modem driver before the CP boots; here that
+  is `s9p_modem`'s `ds_detect`, which `start` sets. This S9+ is the dual-SIM
+  G965F/DS: booted single-SIM, the CP refuses libsec-ril's dual-standby
+  requests (`NET_DUAL_STANDBY_PREF` 0x8003).
+- **The data slot (DDS).** IRadio's `setDataAllowed` reaches libsec-ril
+  without a phone id and it writes `ril.dds.data.slotid=-1`: no data call is
+  ever accepted ("isDdsRil(0)"). Samsung's own `ISehRadio@2.0::setDataAllowed`
+  (transaction 38, `SehAllowDataParam {int32 defaultDataPhoneId}`) carries
+  it: `s9p-radio dds 0`.
+- **The LTE attach APN.** Without `setInitialAttachApn` the CP camps in
+  limited service. libsec-ril replaces it after every radio power-up from
+  its APN database, which is not there, so it has to be set again after
+  the radio comes on.
+- `gsm.sim.operator.numeric`, normally set by the framework from the SIM.
+
+State: registered for voice on LTE (Movistar 214-07, RSRP about -90 dBm);
+calls fall back (CSFB) to Movistar's 3G, which is weak here (RSCP -103 dBm)
+and drop during setup per the CP's own report (SSB JSON, `Etyp 4`). Data:
+the PS domain does not stay registered on LTE yet (EMM/ESM causes 0), so
+libsec-ril rejects data calls ("ps not regi").
+
 
 - Call audio: the CP's voice path runs through ABOX (the `VSS` image).
 - The missing answers (registration, operator), the IMS wait.

@@ -1,0 +1,4 @@
+# Settings of the modem's Android container (extras/modem).
+# Extra androidboot.* options for Android's init, e.g. Samsung's RIL log in
+# full: androidboot.debug_level=0x4948 (high), 0x494d (mid), 0x4f4c (low)
+S9P_ANDROIDBOOT=""

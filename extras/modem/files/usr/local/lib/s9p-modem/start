@@ -41,6 +41,16 @@ chmod 666 $BF/binder $BF/hwbinder $BF/vndbinder
 # as init.baseband.rc; cbd boots the CP once and exits ("Cp boot Oneshot").
 # Once per boot: the CP cannot be restarted short of a reboot.
 [ ! -e /run/s9p-modem/cp-booted ] || exit 0
+# single or dual SIM, from the phone's own factory.prop, before the CP boots
+# (cbd writes it to modem_ctrl_ss310ap's parameter on stock, a path that is
+# s9p_modem's here; a dual-SIM CP booted as single-SIM refuses libsec-ril's
+# dual-standby requests, and with them mobile data)
+N=$(sed -n 's/^ro.multisim.simslotcount=\([0-9]\).*/\1/p' $R/mnt/vendor/efs/factory.prop 2>/dev/null)
+echo "${N:-1}" > /sys/module/s9p_modem/parameters/ds_detect
 chroot $R /vendor/bin/cbd -tss310 -bm -mm \
 	-P platform/11120000.ufs/by-name/RADIO -n /mnt/vendor/efs
 touch /run/s9p-modem/cp-booted
+# the CP is online: ABOX may start the voice firmware cbd loaded (calls
+# need it). Only with extras/audio, which boots ABOX.
+V=/sys/kernel/debug/s9p-abox/start_vss
+[ ! -e $V ] || echo 1 > $V || echo "ABOX did not start VSS" >&2
