@@ -9,6 +9,7 @@
  *   s9p-radio pin 1234                         unlock the SIM
  *   s9p-radio dial +34600000000 [seconds]      call, hang up after the time
  *   s9p-radio hangup
+ *   s9p-radio mode 9                         preferred network (0 2G/3G, 1 2G, 9 LTE/3G/2G)
  *   s9p-radio watch [seconds]                  print indications
  */
 #include <radio_client.h>
@@ -194,13 +195,20 @@ static void status_next(int step)
 
 /* ---- simple requests ---- */
 
+static void fail_done(RadioRequest *req, RADIO_TX_STATUS st, RADIO_RESP resp,
+		      RADIO_ERROR err, const GBinderReader *args, gpointer data);
+
 static void generic_done(RadioRequest *req, RADIO_TX_STATUS st, RADIO_RESP resp,
 			 RADIO_ERROR err, const GBinderReader *args, gpointer data)
 {
 	(void)req; (void)resp; (void)args;
 	if (check(st, err, data))
 		printf("%s: ok\n", (const char *)data);
-	if (!g_object_get_data(G_OBJECT(client), "stay"))
+	if (g_object_get_data(G_OBJECT(client), "stay"))
+		return;
+	if (!strcmp(data, "hangup"))
+		submit(RADIO_REQ_GET_LAST_CALL_FAIL_CAUSE, fail_done);
+	else
 		g_main_loop_quit(loop);
 }
 
@@ -212,6 +220,18 @@ static void power(gboolean on)
 
 	gbinder_writer_append_bool(&w, on);
 	radio_request_set_timeout(req, 30000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+}
+
+static void mode(int type)
+{
+	GBinderWriter w;
+	RadioRequest *req = radio_request_new(client, RADIO_REQ_SET_PREFERRED_NETWORK_TYPE, &w,
+					      generic_done, NULL, "network mode");
+
+	gbinder_writer_append_int32(&w, type);	/* RADIO_PREF_NET_TYPE */
+	radio_request_set_timeout(req, 40000);
 	radio_request_submit(req);
 	radio_request_unref(req);
 }
@@ -235,6 +255,53 @@ static void hangup(void)
 
 	radio_request_submit(req);
 	radio_request_unref(req);
+}
+
+static const char *call_state[] = { "active", "holding", "dialing", "alerting",
+				    "incoming", "waiting" };
+
+static void calls_done(RadioRequest *req, RADIO_TX_STATUS st, RADIO_RESP resp,
+		       RADIO_ERROR err, const GBinderReader *args, gpointer data)
+{
+	GBinderReader r;
+	gsize count = 0, size = 0;
+	const guint8 *calls;
+
+	(void)req; (void)resp; (void)data;
+	if (!check(st, err, "calls"))
+		return;
+	gbinder_reader_copy(&r, args);
+	/* vec<Call_1_2>: the element size comes with the vector */
+	calls = gbinder_reader_read_hidl_vec(&r, &count, &size);
+	if (!count)
+		printf("calls: none\n");
+	else
+		printf("calls: %zu, first %s (index %d)\n", count,
+		       NAME(call_state, ((const gint32 *)calls)[0]), ((const gint32 *)calls)[1]);
+}
+
+static gboolean poll_calls(gpointer data)
+{
+	(void)data;
+	submit(RADIO_REQ_GET_CURRENT_CALLS, calls_done);
+	return G_SOURCE_CONTINUE;
+}
+
+static void fail_done(RadioRequest *req, RADIO_TX_STATUS st, RADIO_RESP resp,
+		      RADIO_ERROR err, const GBinderReader *args, gpointer data)
+{
+	GBinderReader r;
+	const gint32 *v;
+	gsize size;
+
+	(void)req; (void)resp; (void)data;
+	if (check(st, err, "last call fail cause")) {
+		gbinder_reader_copy(&r, args);
+		v = read_struct(&r, &size);
+		if (v)
+			printf("last call fail cause: %d\n", v[0]);
+	}
+	g_main_loop_quit(loop);
 }
 
 static gboolean hangup_cb(gpointer data)
@@ -311,7 +378,10 @@ int main(int argc, char **argv)
 		secs = argc > 3 ? atoi(argv[3]) : 30;
 		g_object_set_data(G_OBJECT(client), "stay", GINT_TO_POINTER(1));
 		dial(argv[2]);
+		g_timeout_add_seconds(3, poll_calls, NULL);
 		g_timeout_add_seconds(secs, hangup_cb, NULL);
+	} else if (!strcmp(cmd, "mode") && argc > 2) {
+		mode(atoi(argv[2]));
 	} else if (!strcmp(cmd, "hangup")) {
 		hangup();
 	} else if (!strcmp(cmd, "watch")) {

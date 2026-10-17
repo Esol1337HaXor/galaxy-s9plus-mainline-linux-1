@@ -330,8 +330,10 @@ int pr_buffer(const char *tag, const char *data, size_t data_len,
 							size_t max_len);
 
 /* print a sk_buff as hex string */
+/* s9p: how much of each packet mif_pkt() prints (module parameter) */
+extern unsigned int pkt_dump_len;
 #define pr_skb(tag, skb) \
-	pr_buffer(tag, (char *)((skb)->data), (size_t)((skb)->len), (size_t)16)
+	pr_buffer(tag, (char *)((skb)->data), (size_t)((skb)->len), (size_t)pkt_dump_len)
 
 /* print a urb as hex string */
 #define pr_urb(tag, urb) \

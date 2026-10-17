@@ -76,6 +76,11 @@ static unsigned long dflags = (1 << DEBUG_FLAG_FMT);
 module_param(dflags, ulong, S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(dflags, "modem_v1 debug flags");
 
+/* s9p: 16 bytes stop before the payload of most IPC messages */
+unsigned int pkt_dump_len = 16;
+module_param(pkt_dump_len, uint, 0644);
+MODULE_PARM_DESC(pkt_dump_len, "bytes of each packet printed by the FMT/RFS/PS packet log (max 128)");
+
 static unsigned long wakeup_dflags = (1 << DEBUG_FLAG_FMT | 1 << DEBUG_FLAG_RFS | 1 << DEBUG_FLAG_PS);
 module_param(wakeup_dflags, ulong, S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(wakeup_dflags, "modem_v1 wakeup debug flags");
@@ -340,7 +345,7 @@ void mif_pkt(u8 ch, const char *tag, struct sk_buff *skb)
 int pr_buffer(const char *tag, const char *data, size_t data_len,
 							size_t max_len)
 {
-	size_t len = min(data_len, max_len);
+	size_t len = min3(data_len, max_len, (size_t)128);
 	unsigned char str[len ? len * 3 : 1]; /* 1 <= sizeof <= max_len*3 */
 	dump2hex(str, (len ? len * 3 : 1), data, len);
 

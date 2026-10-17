@@ -2,9 +2,10 @@
 
 State (2026-10-17): the CP boots on every boot from the phone's own
 firmware, and Samsung's own RIL runs on top of it: the SIM is read, the radio
-registers and **a voice call goes out** (the network answers with the
-ringback tone). No call audio yet (it goes through ABOX), no SMS or data
-tested, and no desktop integration: the test client is `s9p-radio`.
+reaches the network and a call is dialled, but **calls do not get through
+yet**: they stay in DIALING for 30-60 s and are released (see below). No
+call audio, SMS or data yet, and no desktop integration: the test client is
+`s9p-radio`.
 
 ## Pieces
 
@@ -103,6 +104,18 @@ What makes Android's userspace run on Ubuntu's kernel:
 Known gaps: rild waits about 10 s each time it tries to reach the IMS
 service (`imsd`, not running), and `getVoiceRegistrationState` /
 `getOperator` get no answer yet; `dial` does.
+
+## Calls (2026-10-17, Movistar SIM, PLMN 214-07)
+
+The IPC trace (`options s9p-modem pkt_dump_len=96` prints whole Samsung IPC
+messages; main/sub/type at bytes 8-10) shows the call: `CALL_OUTGOING` is
+accepted (`GEN_PHONE_RES 0x8000`), `CALL_STATUS` says DIALING, and after
+30-60 s RELEASED; it never reaches ALERTING. On LTE the CP stays on LTE
+(`NET_REGIST` does not change), so the circuit-switched fallback a call
+needs without VoLTE/IMS does not complete. With 2G/3G forced, one call got
+the network's ringback tone; with 2G only there is no `NET_REGIST` at all.
+Next: decode `NET_REGIST` (registration and reject cause per domain), and
+find what Android's IMS stack or telephony framework normally provides.
 
 ## Next
 
