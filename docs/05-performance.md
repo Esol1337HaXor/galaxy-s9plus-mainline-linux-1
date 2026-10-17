@@ -141,13 +141,38 @@ now arrives in time on 98 % of the transitions; the schedutil rate limit
 | PLL timeouts / transitions | 722 / ~760 | 14 / 807 |
 | M3 core: worst burst | 6.93 ms | 3.88 ms |
 
-### Boost (2704/1794 MHz) and the thermal ceiling
+### Boost, the busy-core rule and the thermal ceiling (2026-10-17)
 
-`s9p_cpufreq.boost=1` was run on 2026-10-15 under a 150 s single-core SHA-256
-load with a digest check (0 wrong rounds out of 2601, no reset), but the M3
-core spent the run at 2327 and 1794 MHz: at 77-80 C the thermal cap steps it
-down before 2704 MHz matters. Sustained, the ceiling is thermal, not the
-boost; it stays off by default.
+Measured with `s9p-cpu-validate` (extras/debug-tools: `stress-ng --verify`,
+600 s per run, clocks and TMU temperatures every 2 s):
+
+| run | errors | M3 clock most of the time | M3 mean temp | bogo ops |
+|---|---|---|---|---|
+| one M3 core, boost on | 0 | 1794 MHz (94 %) | 72 C | 67 267 |
+| four A55 cores at 1794 MHz / 1000 mV | 0 | -- | 66 C | 179 706 |
+| all eight + memory worker | 0 | 1066 MHz | 85 C | 272 014 |
+| frequency torture, ~22k transitions, 400 MHz under load | 0 | mixed | 86 C | -- |
+| four M3 cores, 3-4-busy cap raised to 2327 MHz | 0 | 1066-1469 MHz | 82 C | 177 174 |
+
+**Thermal levels at the stock control temperatures** (M3 83 C, 5 C of
+hysteresis) did the same work to within 1.5 % and ran 7-9 C hotter: the
+sustained ceiling is the heat the phone sheds, so the cooler levels stay.
+
+**Boost stays off.** A three-second burst from 56 C runs at 1794 MHz with
+boost on or off. The busy-core rule counts `!idle_cpu()` at the instant of
+the poll, and on a running desktop some other M3 core nearly always is
+(a kworker, the compositor), so the 3-4-busy cap of 1794 MHz applies.
+Samsung only runs 2704 MHz with the other M3 cores *offline* (the hotplug
+governor's single mode); with all four online a wake-up can always land on
+them, and four cores at 2704 MHz is the measured hard reset. Since kernel #14
+the rule is re-checked every 10 ms while the cluster is above 2327 MHz, and
+`s9p_cpufreq.cap_many_busy` (default 1794000) can raise the 3-4-busy cap to
+2327000 for testing: no error in 30 minutes, but the thermal levels kept the
+cluster below 2327 MHz almost all of that time, which is not a validation.
+
+**Battery guard.** `s9p_cpufreq.temp_batt` is the fuel gauge's temperature;
+at 43 C both clusters are held to 1499/1794 MHz, at 46 C to 1150/1066 MHz,
+released 2 C lower -- for a phone that lives on the charger.
 
 ## 6. Idle power -- measured at the battery
 

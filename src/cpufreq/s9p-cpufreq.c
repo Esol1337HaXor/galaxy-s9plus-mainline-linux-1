@@ -28,7 +28,11 @@
  *  - a thermal cap read straight from the TMU (the stock 96/91 C hotplug
  *    limits are far too late for a phone that must never get hot): the
  *    M3 cluster steps down from 72 C, the A55 cluster from 76 C, the GPU
- *    from 80 C, each level with 8 C of hysteresis on the way back up.
+ *    from 80 C, each level with 8 C of hysteresis on the way back up;
+ *    and a battery guard on the fuel gauge's temperature (43 / 46 C).
+ *
+ * While the M3 cluster runs above 2327 MHz (boost) the busy-core rule is
+ * re-checked every 10 ms instead of every 100 ms.
  */
 #include <linux/cpufreq.h>
 #include <linux/delay.h>
@@ -38,6 +42,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/pm_qos.h>
+#include <linux/power_supply.h>
 #include <linux/sched.h>
 #include <linux/workqueue.h>
 
@@ -114,6 +119,8 @@ struct s9p_thermal_level {
 #define THERMAL_HYST		8
 #define THERMAL_HOLD_MS		2000
 #define THERMAL_PERIOD_MS	100
+/* while the M3 cluster runs above its two-core step (boost only) */
+#define BOOST_PERIOD_MS		10
 
 /*
  * Idle floor.
@@ -139,6 +146,14 @@ struct s9p_thermal_level {
 #define IDLE_ENTER_POLLS	5
 #define IDLE_RELEASE_MS		25
 
+/*
+ * Thermal levels. Measured 2026-10-17 against levels at the stock device
+ * tree's control temperatures (M3 83 C, A55 81/88 C, GPU 85/92 C, 5 C of
+ * hysteresis): the same stress-ng --verify runs did the same work to within
+ * 1.5 % (one M3 core, four A55 cores, all eight), only 7-9 C hotter. The
+ * phone's sustained performance is what it can shed as heat, so the cooler
+ * levels below stay.
+ */
 static const struct s9p_thermal_level s9p_thermal_big[] = {
 	{ 2704000,  0 },
 	{ 2327000, 72 },
@@ -161,6 +176,25 @@ static const struct s9p_thermal_level s9p_thermal_gpu[] = {
 	{ 260000, 90 },
 };
 
+/*
+ * Battery temperature guard. A lithium cell that sits at full charge on the
+ * charger ages fastest when warm, and the CPU cores are its largest heat
+ * source. The fuel gauge's temperature (tenths of a degree) is read every
+ * BATT_PERIOD_MS; at 43 C both clusters are held to their mid steps, at
+ * 46 C to their low ones, each released 2 C lower.
+ */
+#define BATT_PERIOD_MS		5000
+#define BATT_HYST		20	/* tenths of a degree */
+
+static const struct s9p_batt_level {
+	int up_at;			/* tenths of a degree */
+	unsigned int max_khz[2];	/* little, big */
+} s9p_batt_levels[] = {
+	{ INT_MIN, { 1794000, 2704000 } },
+	{ 430,     { 1499333, 1794000 } },
+	{ 460,     { 1150500, 1066000 } },
+};
+
 struct s9p_cluster {
 	const char *name;
 	void __iomem *pll_con0;
@@ -173,6 +207,7 @@ struct s9p_cluster {
 	const struct s9p_thermal_level *thermal;
 	unsigned int nthermal;
 	unsigned int thermal_lvl;
+	unsigned int thermal_cap;	/* applied qos_thermal value */
 	ktime_t thermal_changed;
 	unsigned int busy_cap;
 	unsigned int safe_max;		/* top step proven under load */
@@ -373,9 +408,20 @@ static unsigned int s9p_big_busy_cores(void)
 	return busy;
 }
 
+/*
+ * The cap with three or four busy M3 cores. Samsung's 1794 MHz is the
+ * default; 2327 MHz on four cores is what s9p-cpu-validate big4 measures
+ * with this raised at run time.
+ */
+static unsigned int s9p_cap_many = 1794000;
+module_param_named(cap_many_busy, s9p_cap_many, uint, 0644);
+MODULE_PARM_DESC(cap_many_busy, "M3 maximum with 3-4 busy cores, kHz (1794000 or 2327000)");
+
 static unsigned int s9p_big_cap_for(unsigned int busy)
 {
-	return (busy >= 3) ? 1794000 : (busy == 2) ? 2327000 : 2704000;
+	unsigned int many = s9p_cap_many >= 2327000 ? 2327000 : 1794000;
+
+	return (busy >= 3) ? many : (busy == 2) ? 2327000 : 2704000;
 }
 
 static int s9p_target(struct cpufreq_policy *policy, unsigned int target,
@@ -474,6 +520,7 @@ static int s9p_init(struct cpufreq_policy *policy)
 	}
 	c->idle_polls = 0;
 	c->idle_capped = false;
+	c->thermal_cap = 0;	/* the next poll applies thermal and battery caps */
 	c->qos_added = true;
 
 	return 0;
@@ -678,6 +725,42 @@ static void s9p_idle_floor(struct s9p_cluster *c, unsigned int index)
 static unsigned int gpu_lvl;
 static ktime_t gpu_changed;
 
+static unsigned int s9p_batt_lvl;
+static int s9p_temp_batt = INT_MIN;
+module_param_named(temp_batt, s9p_temp_batt, int, 0444);
+MODULE_PARM_DESC(temp_batt, "battery temperature in tenths of a degree, as last read");
+
+static void s9p_batt_update(void)
+{
+	static struct power_supply *bat;
+	static ktime_t last;
+	union power_supply_propval v;
+	unsigned int lvl = s9p_batt_lvl, i;
+
+	if (last && ktime_ms_delta(ktime_get(), last) < BATT_PERIOD_MS)
+		return;
+	last = ktime_get();
+	if (!bat)
+		bat = power_supply_get_by_name("max170xx_battery");
+	if (!bat || power_supply_get_property(bat, POWER_SUPPLY_PROP_TEMP, &v))
+		return;
+	s9p_temp_batt = v.intval;
+
+	for (i = ARRAY_SIZE(s9p_batt_levels) - 1; i > 0; i--)
+		if (v.intval >= s9p_batt_levels[i].up_at)
+			break;
+	if (i > lvl)
+		lvl = i;
+	else
+		while (lvl > i && v.intval < s9p_batt_levels[lvl].up_at - BATT_HYST)
+			lvl--;
+	if (lvl != s9p_batt_lvl) {
+		pr_info("s9p-cpufreq: battery %d.%d C -> level %u\n",
+			v.intval / 10, v.intval % 10, lvl);
+		s9p_batt_lvl = lvl;
+	}
+}
+
 static void s9p_policy_work(struct work_struct *work);
 static DECLARE_DELAYED_WORK(s9p_policy_dwork, s9p_policy_work);
 static int s9p_temp_big, s9p_temp_little, s9p_temp_gpu;
@@ -688,9 +771,31 @@ module_param_named(temp_gpu, s9p_temp_gpu, int, 0444);
 static void s9p_policy_work(struct work_struct *work)
 {
 	int t_big = INT_MIN, t_little = INT_MIN, t_gpu = INT_MIN;
-	unsigned int i, lvl, cap;
+	unsigned int i, lvl, cap, period;
+	static ktime_t last_full;
+	struct s9p_cluster *big = &s9p_clusters[1];
 
 	static struct s9p_tmu_filter filter_big, filter_little, filter_gpu;
+
+	/*
+	 * The fast boost poll only re-applies the busy-core rule; the TMU
+	 * filter and the idle floor keep their 100 ms rhythm (a median of
+	 * three 10 ms samples would no longer hide the sensor's spikes).
+	 */
+	if (big->qos_added && last_full &&
+	    ktime_ms_delta(ktime_get(), last_full) < THERMAL_PERIOD_MS &&
+	    s9p_current_khz(big) > 2327000) {
+		cap = s9p_big_cap_for(s9p_big_busy_cores());
+		if (cap != big->busy_cap) {
+			big->busy_cap = cap;
+			freq_qos_update_request(&big->qos_busy, cap);
+		}
+		schedule_delayed_work_on(0, &s9p_policy_dwork,
+					 msecs_to_jiffies(BOOST_PERIOD_MS));
+		return;
+	}
+	last_full = ktime_get();
+	s9p_batt_update();
 
 	if (tmu_cpu) {
 		t_big = s9p_tmu_filtered(&filter_big,
@@ -721,8 +826,12 @@ static void s9p_policy_work(struct work_struct *work)
 			pr_info("s9p-cpufreq: %s %d C -> max %u MHz\n",
 				c->name, t, c->thermal[lvl].max_khz / 1000);
 			c->thermal_lvl = lvl;
-			freq_qos_update_request(&c->qos_thermal,
-						c->thermal[lvl].max_khz);
+		}
+		cap = min(c->thermal[lvl].max_khz,
+			  s9p_batt_levels[s9p_batt_lvl].max_khz[i]);
+		if (cap != c->thermal_cap) {
+			c->thermal_cap = cap;
+			freq_qos_update_request(&c->qos_thermal, cap);
 		}
 
 		if (i == 1) {
@@ -753,11 +862,21 @@ static void s9p_policy_work(struct work_struct *work)
 	/* CPU0 is the always-online A55 housekeeping CPU on star2lte. Running
 	 * this sampler on M3 wakes that cluster and counts the sampler itself
 	 * as busy, defeating the idle floor it is supposed to manage. */
-	schedule_delayed_work_on(0, &s9p_policy_dwork,
-			      msecs_to_jiffies(s9p_clusters[0].idle_capped ||
-					       s9p_clusters[1].idle_capped ?
-					       IDLE_RELEASE_MS :
-					       THERMAL_PERIOD_MS));
+	/*
+	 * Above 2327 MHz the busy-core rule must not wait for the slow poll:
+	 * s9p_target() applies it at every frequency change, but a cluster
+	 * already at 2704 MHz with one busy core gets no new request when
+	 * three more cores wake up (schedutil asks for the same top step),
+	 * and four busy cores at 2704 MHz is the measured hard reset. So while
+	 * the clock is that high the rule is re-checked every 10 ms.
+	 */
+	period = THERMAL_PERIOD_MS;
+	if (s9p_clusters[0].idle_capped || s9p_clusters[1].idle_capped)
+		period = IDLE_RELEASE_MS;
+	if (s9p_clusters[1].qos_added &&
+	    s9p_current_khz(&s9p_clusters[1]) > 2327000)
+		period = BOOST_PERIOD_MS;
+	schedule_delayed_work_on(0, &s9p_policy_dwork, msecs_to_jiffies(period));
 }
 
 /* ---------------------------------------------------------------- probe */
