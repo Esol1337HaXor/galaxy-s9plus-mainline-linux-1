@@ -49,9 +49,11 @@ computer or a home server, even one with a broken screen.
 ✅ working on the physical phone · 🟡 experimental or partially validated ·
 ❌ unavailable · ❓ not tested
 
-The USB-C display, audio, Bluetooth, microSD and other pieces are optional
-[extras](extras/README.md), mostly built as kernel modules. How every driver works,
-and what does not yet, is documented in [docs/](docs/).
+All of the hardware above works out of the box: the image installs it on the
+first boot. Much of it is built as kernel modules ([extras](extras/README.md)).
+The image also comes with [Galaxy Companion](https://github.com/agcarbajo/galaxy-companion),
+the settings app for the LED, vibration, charge limit and Bixby key. How every
+driver works, and what does not yet, is documented in [docs/](docs/).
 
 ## Installation
 
@@ -90,11 +92,12 @@ sudo scripts/build/build_stable.sh
 sudo TWRP_IMG=/path/to/twrp-3.3.1-0-star2lte.img \
     scripts/build/pack_uniloader.sh dist/m71-<stamp> boot-s9plus.img
 
-# 3. the Ubuntu root filesystem (asks for your password)
-sudo image/build-image.sh
-
-# 4. optional: the modules of the extras (display, audio, Bluetooth, microSD...)
+# 3. the modules and programs of the hardware features (display, audio,
+#    Bluetooth, microSD, modem...), which the image carries
 sudo scripts/build/build_extras.sh
+
+# 4. the Ubuntu root filesystem (asks for your password)
+sudo image/build-image.sh
 ```
 
 - The kernel tree lives in `BUILD` (default `/mnt/build`; `BUILD=/some/dir`
@@ -116,26 +119,24 @@ python3 scripts/flash/flash_s9plus_boot_adb.py dist/uniloader/boot-s9plus.img
 ### First boot
 
 The root filesystem grows to the whole partition, the phone makes its own SSH
-keys, and GNOME logs your user in. Over the USB cable the phone is
+keys, installs the hardware features, restarts once by itself, and GNOME
+logs your user in. Mobile data comes up on its own when there is a SIM. Over
+the USB cable the phone is
 `172.16.42.2`: give the PC's new USB network adapter `172.16.42.1/24` and run
 `ssh <user>@172.16.42.2`. Wi-Fi is set up from the GNOME menu. Details:
 [docs/03-installing.md](docs/03-installing.md).
 
 ### Extras
 
-Nothing extra is preinstalled. Copy the repository (with `dist/`, if you built
-the extras) to the phone and install what you want there:
+The hardware features ([`extras/defaults`](extras/defaults)) come installed.
+The optional ones, and removing any feature, from the image's copy on the
+phone:
 
 ```bash
+cd /usr/local/share/s9p-port
 sudo extras/install.sh                    # list them
-sudo extras/install.sh usb-c-display      # external monitor, USB host, HDMI audio
-sudo extras/install.sh audio              # speaker and headphones (reboot after)
-sudo extras/install.sh notification-led   # RGB LED: orange charging, green full
-sudo extras/install.sh bluetooth          # Bluetooth (needs usb-c-display)
-sudo extras/install.sh vibration          # vibration motor + feedbackd
-sudo extras/install.sh microsd            # the microSD slot
-sudo extras/install.sh low-power          # lower idle power
-sudo extras/install.sh power-profiles     # --remove takes any of them out again
+sudo extras/install.sh flight-recorder    # an optional one
+sudo extras/install.sh audio --remove     # take a feature out again
 ```
 
 | Extra | What it does |
@@ -225,7 +226,7 @@ src/                 the drivers this port adds to the mainline tree
 bootloader/uniLoader/  the shim that starts a mainline kernel on this S-Boot
 image/               build the Ubuntu root filesystem
 device/              initramfs init scripts, and the hardware layer of the image (base/)
-extras/              optional features, installed on request
+extras/              hardware features (installed on first boot) and optional ones
 scripts/build/       kernel, boot image, DTBH table, busybox, extra modules
 scripts/flash/       write boot and rootfs to the phone from TWRP
 firmware/            BCM4361 firmware and the wireless regulatory database
