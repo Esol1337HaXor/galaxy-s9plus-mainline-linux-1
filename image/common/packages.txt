@@ -62,6 +62,10 @@ yaru-theme-gnome-shell
 yaru-theme-gtk
 yaru-theme-icon
 yaru-theme-sound
+# Ubuntu's defaults (Yaru, Ubuntu Sans, the dock, the wallpaper): only a
+# Recommends of the desktop metapackages, so without it GNOME keeps Adwaita
+ubuntu-settings
+ubuntu-wallpapers
 adwaita-icon-theme
 fonts-ubuntu
 gnome-backgrounds
