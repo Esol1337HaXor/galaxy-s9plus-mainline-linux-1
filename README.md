@@ -42,7 +42,7 @@ computer or a home server, even one with a broken screen.
 | CPU scaling | ✅ | Both clusters follow the load; thermal and battery caps |
 | Power management | 🟡 | Memory DVFS, unused blocks off; no deep CPU idle or suspend yet |
 | Cameras | 🟡 | Front sensor answers on I2C; no image yet |
-| Mobile network | 🟡 | LTE mobile data works (by hand, `s9p-radio`); calls do not connect yet |
+| Mobile network | 🟡 | LTE mobile data out of the box; calls and SMS not yet |
 | Fingerprint reader | ❓ | Not tested |
 | Motion sensors | ❓ | Not tested |
 

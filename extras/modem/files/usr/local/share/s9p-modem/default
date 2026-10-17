@@ -1,0 +1,16 @@
+# Settings of the modem (extras/modem). Installed as /etc/default/s9p-modem
+# when that is not there yet; later installs leave it alone.
+
+# Mobile data (s9p-mobile.service). The APN comes from
+# mobile-broadband-provider-info by the SIM's MCC/MNC unless set here.
+S9P_MOBILE_DATA=yes
+#S9P_APN=
+#S9P_APN_USER=
+#S9P_APN_PASSWORD=
+S9P_DATA_ROAMING=no
+# default route metric; Wi-Fi's is 600, so Wi-Fi wins when it is up
+S9P_DATA_METRIC=750
+
+# Extra androidboot.* options for Android's init, e.g. Samsung's RIL log in
+# full: androidboot.debug_level=0x4948 (high), 0x494d (mid), 0x4f4c (low)
+S9P_ANDROIDBOOT=""

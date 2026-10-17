@@ -1,0 +1,13 @@
+[Unit]
+Description=Galaxy S9+ mobile data
+Requires=s9p-android.service
+After=s9p-android.service systemd-resolved.service
+
+[Service]
+EnvironmentFile=-/etc/default/s9p-modem
+ExecStart=/usr/local/bin/s9p-mobile
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

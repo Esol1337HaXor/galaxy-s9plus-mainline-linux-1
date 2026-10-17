@@ -139,9 +139,15 @@ and then decodes every IPC message it sends and receives):
   the radio comes on.
 - `gsm.sim.operator.numeric`, normally set by the framework from the SIM.
 
-**Mobile data works** (2026-10-17, Movistar LTE): `rmnet0` gets an IPv4
-and an IPv6 address and Movistar's DNS; ping and HTTP go through it. The
-sequence, what Android's telephony does, with `s9p-radio`:
+**Mobile data works out of the box** (2026-10-17, Movistar LTE):
+`s9p-mobile.service` brings it up about 50 s into a boot. `rmnet0` gets an
+IPv4 and an IPv6 address; the default route has metric 750, behind Wi-Fi's
+600, so Wi-Fi wins when it is there; the DNS servers go to systemd-resolved;
+NetworkManager leaves `rmnet*` alone. The APN comes from
+`mobile-broadband-provider-info` by the SIM's MCC/MNC (any operator listed
+there); `/etc/default/s9p-modem` can set it, turn data or roaming off, or
+change the metric. `/run/s9p-modem/mobile` has the state. What it does,
+which is what Android's telephony does (by hand with `s9p-radio`):
 
 1. `dds 0` and `mobiledata on` (ISehRadio), then `on` (radio power);
 2. `attach telefonica.es telefonica telefonica` after the radio is on

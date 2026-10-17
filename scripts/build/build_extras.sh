@@ -129,9 +129,11 @@ cp "$WORK"/haptic-src/*.ko "$OUT/haptic/"
 cp "$WORK"/sdcard-src/*.ko "$WORK"/exfat/exfat.ko "$OUT/sdcard/"
 cp "$WORK"/power-src/*.ko "$OUT/power/"
 cp "$WORK"/modem-src/*.ko "$WORK/s9p-noselinux.so" "$OUT/modem/"
+echo "=== modem userspace: s9p-mobile, s9p-radio (libgbinder) ==="
+bash "$PROJ/scripts/build/build_modem_userspace.sh" "$BUILD/modem-user" "$OUT/modem"
 cp "$WORK"/bluetooth-src/*.ko "$OUT/bluetooth/"
 find "$WORK/bt-net" "$WORK/bt-drv" -name '*.ko' -exec cp {} "$OUT/bluetooth/" \;
 "${CROSS_COMPILE}strip" --strip-debug "$OUT"/*/*.ko
-(cd "$OUT" && sha256sum */*.ko modem/*.so > SHA256SUMS)
+(cd "$OUT" && sha256sum */*.ko modem/*.so modem/s9p-mobile modem/s9p-radio > SHA256SUMS)
 echo "=== done: $(ls "$OUT"/*/*.ko | wc -l) modules in dist/extras/$KREL ==="
 echo "copy the repository (with dist/) to the phone, then: sudo extras/install.sh usb-c-display / audio / notification-led / bluetooth / vibration / microsd / low-power / modem"
