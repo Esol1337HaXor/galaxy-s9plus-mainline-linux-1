@@ -2,6 +2,7 @@
 # The modem's host userspace: libglibutil, libgbinder and libgbinder-radio
 # (Jolla/mer-hybris, BSD) at fixed versions, linked statically into
 # s9p-mobile (mobile data, extras/modem) and s9p-radio (test client).
+# Needs gdbus-codegen (libglib2.0-dev-bin) for s9p-mobile's D-Bus side.
 #   build_modem_userspace.sh <work dir> <output dir>
 # Native on arm64; elsewhere CROSS_COMPILE=aarch64-linux-gnu- with the arm64
 # GLib from toolchain.sh.
@@ -57,7 +58,16 @@ pc libgbinder-radio "$W/libgbinder-radio" "libgbinder"
 LIBS="$W/libgbinder-radio/build/release/libgbinder-radio.a $W/libgbinder/build/release/libgbinder.a \
 	$W/libglibutil/build/release/libglibutil.a $(pkg-config --libs gobject-2.0 glib-2.0) -lpthread"
 CFLAGS="-O2 -Wall $(pkg-config --cflags libgbinder-radio) -I$W/libgbinder-radio/include"
-$CC $CFLAGS -o "$OUT/s9p-mobile" "$SRC/s9p-mobile.c" "$SRC/s9p-ril.c" $LIBS
+# ModemManager's D-Bus API for s9p-mobile (s9p-mm.c), from its introspection
+GEN=$W/mm-gen; mkdir -p "$GEN"
+(cd "$GEN" && gdbus-codegen --interface-prefix org.freedesktop. --c-namespace S9pMm \
+	--generate-c-code s9p-mm-manager "$SRC/mm/org.freedesktop.ModemManager1.xml" &&
+gdbus-codegen --interface-prefix org.freedesktop.ModemManager1. --c-namespace S9pMm \
+	--c-generate-object-manager --generate-c-code s9p-mm-gen \
+	"$SRC"/mm/org.freedesktop.ModemManager1.{Modem,Modem.Modem3gpp,Modem.Simple,Sim,Bearer}.xml)
+GIO="$(pkg-config --cflags --libs gio-2.0)"
+$CC $CFLAGS -I"$GEN" -o "$OUT/s9p-mobile" "$SRC/s9p-mobile.c" "$SRC/s9p-ril.c" "$SRC/s9p-mm.c" \
+	"$GEN/s9p-mm-gen.c" "$GEN/s9p-mm-manager.c" $LIBS $GIO
 $CC $CFLAGS -o "$OUT/s9p-radio" "$SRC/s9p-radio.c" $LIBS
 ${CC%gcc}strip "$OUT/s9p-mobile" "$OUT/s9p-radio" 2>/dev/null || strip "$OUT/s9p-mobile" "$OUT/s9p-radio"
 echo "modem userspace: $(cd "$OUT" && ls s9p-mobile s9p-radio | tr '\n' ' ')"

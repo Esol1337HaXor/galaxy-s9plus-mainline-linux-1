@@ -9,6 +9,7 @@
 | `exynos-bootfb.c` | generated at build time | `drivers/gpu/drm/sysfb/simpledrm.c` from the kernel tree being built, with `DRIVER_NAME` renamed | GPL-2.0 |
 | BCM4361 firmware, NVRAM, CLM blob, Bluetooth patchram | `firmware/`, `device/base/lib/firmware/brcm/` | Samsung SM-G965F stock firmware | Broadcom, redistributed as shipped on the device; not GPL |
 | `regulatory.db`, `regulatory.db.p7s` | `firmware/` | `wireless-regdb` | ISC |
+| ModemManager D-Bus introspection | `src/modem/userspace/mm/` | https://gitlab.freedesktop.org/mobile-broadband/ModemManager, `introspection/` at 1.22.0, unmodified | ModemManager's (daemon GPL-2.0-or-later; libmm-glib, generated from these files, LGPL-2.0-or-later) |
 | TWRP 3.3.1-0 for star2lte | not in this repository | https://twrp.me | its own terms |
 | Boot logo | `branding/shero_logo.ppm` | this project (`scripts/build/make_logo.py`) | GPL-2.0 |
 

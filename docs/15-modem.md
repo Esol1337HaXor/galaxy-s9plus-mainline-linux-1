@@ -3,9 +3,9 @@
 State (2026-10-17): the CP boots on every boot from the phone's own
 firmware, and Samsung's own RIL runs on top of it: the SIM is read, the radio
 reaches the network and a call is dialled, but **calls do not get through
-yet**: they stay in DIALING for 30-60 s and are released (see below). No
-call audio, SMS or data yet, and no desktop integration: the test client is
-`s9p-radio`.
+yet**: they stay in DIALING for 30-60 s and are released (see below).
+Mobile data works and shows in GNOME (see the end); no call audio or SMS
+yet. The test client is `s9p-radio`.
 
 ## Pieces
 
@@ -139,15 +139,13 @@ and then decodes every IPC message it sends and receives):
   the radio comes on.
 - `gsm.sim.operator.numeric`, normally set by the framework from the SIM.
 
-**Mobile data works out of the box** (2026-10-17, Movistar LTE):
-`s9p-mobile.service` brings it up about 50 s into a boot. `rmnet0` gets an
-IPv4 and an IPv6 address; the default route has metric 750, behind Wi-Fi's
-600, so Wi-Fi wins when it is there; the DNS servers go to systemd-resolved;
-NetworkManager leaves `rmnet*` alone. The APN comes from
-`mobile-broadband-provider-info` by the SIM's MCC/MNC (any operator listed
-there); `/etc/default/s9p-modem` can set it, turn data or roaming off, or
-change the metric. `/run/s9p-modem/mobile` has the state. What it does,
-which is what Android's telephony does (by hand with `s9p-radio`):
+**Mobile data works out of the box** (2026-10-17, Movistar LTE), in GNOME
+like on any laptop with a modem (see "In GNOME" below): connected about 45 s
+into a boot, IPv4 and IPv6, behind Wi-Fi (route metric 700 against 600).
+The APN comes from `mobile-broadband-provider-info` by the SIM's MCC/MNC
+(any operator listed there). `/run/s9p-modem/mobile` has the state. What
+`s9p-mobile` does, which is what Android's telephony does (by hand with
+`s9p-radio`):
 
 1. `dds 0` and `mobiledata on` (ISehRadio), then `on` (radio power);
 2. `attach telefonica.es telefonica telefonica` after the radio is on
@@ -157,6 +155,49 @@ which is what Android's telephony does (by hand with `s9p-radio`):
    calls with "ps not regi";
 4. `data telefonica.es telefonica telefonica`: libsec-ril brings `rmnet0`
    up with the address itself; routes and DNS are left to the host.
+
+### In GNOME: ModemManager's API
+
+GNOME (Quick Settings, Settings > Mobile Network) and NetworkManager see
+modems only through ModemManager, and ModemManager cannot drive Samsung's
+RIL. So `s9p-mobile` takes ModemManager's place on the system bus
+(`org.freedesktop.ModemManager1`): `s9p-mm.c` serves the part of its API
+they use, from ModemManager's own introspection (`src/modem/userspace/mm/`,
+1.22, through gdbus-codegen). Only one IRadio client can have rild's
+answers, so this lives in `s9p-mobile` and not in a second service.
+
+- Steps 1-3 run at boot; the modem goes REGISTERED after the attach.
+- NetworkManager's "Mobile data" connection (`mobile-data.nmconnection`,
+  installed once by the extra, `auto-config`) connects: `Simple.Connect` is
+  step 4, and the bearer hands NetworkManager the addresses, gateways, DNS
+  and MTU rild gave (static IP method). NetworkManager sets them on
+  `rmnet0`, with routes and DNS. Off in Quick Settings (`Enable(false)`)
+  ends the data call; the radio stays on.
+- A lost data call is reported (the bearer disconnects) and NetworkManager
+  redials. Signal quality is from RSRP (getSignalStrength_1_4 every 30 s,
+  plus the indications); IMEI and baseband version from rild.
+- Only root may connect, disconnect or switch off (NetworkManager); anyone
+  may read, as with ModemManager. `/etc/dbus-1/system.d/s9p-mobile.conf`.
+- What ModemManager would also do (bands, modes, network scan, PIN
+  changes, SMS, location) answers "not implemented".
+
+Three things NetworkManager needs that took finding out:
+
+- **The modem appears a moment after the name** (2 s), with its SIM.
+  When the name gets an owner NetworkManager replaces its object manager
+  client; a modem already there reaches it through the old client and it
+  keeps that one, deaf to every change ("already exists, ignoring"). It
+  also asks for the SIM only when the modem appears.
+- **The object manager is on the bus before the name is asked for**: the
+  client calls `GetManagedObjects` as soon as the name has an owner.
+- **The new `State` goes out before `StateChanged`**: NetworkManager reads
+  the property when the signal comes, and the skeleton sends property
+  changes on the next idle, so a connection waiting for REGISTERED never
+  went on.
+
+`S9P_MOBILE_NETWORKMANAGER=no` in `/etc/default/s9p-modem` is the old way:
+`s9p-mobile` connects by itself, sets the route (metric `S9P_DATA_METRIC`)
+and DNS, and redials; nothing in GNOME.
 
 libgbinder-radio misses libsec-ril's answers to the registration queries
 (the RIL log shows them); `s9p-radio` reads what it needs from elsewhere.
@@ -173,5 +214,5 @@ client. `SMS_DEVICE_READY` comes with the CS registration on LTE (SGs).
 
 - Call audio: the CP's voice path runs through ABOX (the `VSS` image).
 - The missing answers (registration, operator), the IMS wait.
-- A desktop stack: oFono with its binder plugin (Sailfish/Droidian) on
-  `/dev/hwbinder`, for GNOME Calls, SMS and mobile data on `rmnet0-7`.
+- Calls and SMS on the desktop (GNOME Calls, Chatty): ModemManager's Voice
+  and Messaging interfaces in `s9p-mm.c`, once calls get through.

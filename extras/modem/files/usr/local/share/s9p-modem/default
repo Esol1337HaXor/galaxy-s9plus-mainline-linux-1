@@ -1,9 +1,14 @@
 # Settings of the modem (extras/modem). Installed as /etc/default/s9p-modem
 # when that is not there yet; later installs leave it alone.
 
-# Mobile data (s9p-mobile.service). The APN comes from
-# mobile-broadband-provider-info by the SIM's MCC/MNC unless set here.
+# Mobile data (s9p-mobile.service). NetworkManager connects it, and it
+# shows in GNOME (Quick Settings, Settings > Mobile Network): the APN,
+# roaming and on/off are set there, in the "Mobile data" connection.
 S9P_MOBILE_DATA=yes
+# "no": s9p-mobile connects on its own, without NetworkManager or GNOME, and
+# the settings below apply. The APN comes from mobile-broadband-provider-info
+# by the SIM's MCC/MNC unless set here.
+S9P_MOBILE_NETWORKMANAGER=yes
 #S9P_APN=
 #S9P_APN_USER=
 #S9P_APN_PASSWORD=

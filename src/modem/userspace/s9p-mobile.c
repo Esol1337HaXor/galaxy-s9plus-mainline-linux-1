@@ -10,23 +10,34 @@
  *      every power-up);
  *   4. a data registration query (libsec-ril only refreshes its PS state
  *      when asked) and the data call; rild brings the interface (rmnet0) up
- *      with the address, this adds the default route behind Wi-Fi's and the
- *      DNS servers (systemd-resolved);
- *   5. watching it, and doing 4 again when the data call is lost.
+ *      with the address;
+ *   5. watching it.
+ *
+ * With NetworkManager (the default) the modem is offered to it through
+ * ModemManager's D-Bus API (s9p-mm.c): 1-3 happen at boot, and the data
+ * call (4) when NetworkManager connects, which then sets the addresses,
+ * routes and DNS and shows the modem in GNOME; a lost call is reported to
+ * it, and it reconnects. Without it (S9P_MOBILE_NETWORKMANAGER=no) this
+ * connects on its own, adds the default route behind Wi-Fi's and the DNS
+ * servers (systemd-resolved), and redials a lost call.
  *
  * Settings in /etc/default/s9p-modem (all optional):
  *   S9P_MOBILE_DATA=no            no mobile data
+ *   S9P_MOBILE_NETWORKMANAGER=no  connect without NetworkManager (no desktop
+ *                                 integration; the settings below then apply)
  *   S9P_APN, S9P_APN_USER, S9P_APN_PASSWORD   instead of the database's
  *   S9P_DATA_ROAMING=yes          data when roaming
  *   S9P_DATA_METRIC=750           default route metric (Wi-Fi: 600)
  * State for other programs: /run/s9p-modem/mobile (key=value).
  */
 #include "s9p-ril.h"
+#include "s9p-mm.h"
 
 #include <radio_client.h>
 #include <radio_instance.h>
 #include <radio_request.h>
 
+#include <gbinder_buffer.h>
 #include <gbinder_reader.h>
 
 #include <glib.h>
@@ -48,6 +59,7 @@ static struct {
 	char *apn, *user, *pass;
 	gboolean roaming;
 	int metric;
+	gboolean nm;		/* NetworkManager drives the data call */
 } cfg;
 
 static struct {
@@ -56,6 +68,12 @@ static struct {
 	guint retry;		/* timeout source */
 	int failures;
 	char *address;
+	int cid;		/* of the data call, for deactivating it */
+	char *attached;		/* the LTE attach APN set */
+	/* the data call NetworkManager asked for */
+	gboolean connecting, cancel;
+	char *apn, *user, *pass;
+	gboolean roaming;
 } st;
 
 static void data_cycle(void);
@@ -243,6 +261,70 @@ static gboolean data_cycle_cb(gpointer d)
 	return G_SOURCE_REMOVE;
 }
 
+/* "10.0.0.2/24" -> address and prefix; a bare address gets the family's full length */
+static char *split_prefix(const char *s, guint *prefix)
+{
+	const char *slash = strchr(s, '/');
+
+	*prefix = slash ? (guint)atoi(slash + 1) : (strchr(s, ':') ? 128 : 32);
+	return slash ? g_strndup(s, slash - s) : g_strdup(s);
+}
+
+/* hand the data call to NetworkManager, which sets it up */
+static void report_up(const RadioDataCall_1_4 *dc)
+{
+	const GBinderHidlString *s;
+	struct mm_ip ip4 = { 0 }, ip6 = { 0 };
+	GPtrArray *keep = g_ptr_array_new_with_free_func(g_free);
+	guint i, n4 = 0, n6 = 0;
+
+	g_free(st.ifname);
+	st.ifname = g_strdup(dc->ifname.data.str);
+	s = dc->addresses.data.ptr;
+	for (i = 0; s && i < dc->addresses.count; i++) {
+		struct mm_ip *ip = strchr(s[i].data.str, ':') ? &ip6 : &ip4;
+
+		if (!ip->address) {
+			ip->address = split_prefix(s[i].data.str, &ip->prefix);
+			g_ptr_array_add(keep, (char *)ip->address);
+		}
+	}
+	s = dc->gateways.data.ptr;
+	for (i = 0; s && i < dc->gateways.count; i++) {
+		const char *g = s[i].data.str;
+
+		if (!strcmp(g, "0.0.0.0") || !strcmp(g, "::"))
+			continue;
+		if (strchr(g, ':') ? !ip6.gateway : !ip4.gateway)
+			*(strchr(g, ':') ? &ip6.gateway : &ip4.gateway) = g;
+	}
+	s = dc->dnses.data.ptr;
+	for (i = 0; s && i < dc->dnses.count; i++) {
+		const char *d = s[i].data.str;
+
+		if (!strcmp(d, "0.0.0.0"))
+			continue;
+		if (strchr(d, ':') && n6 < G_N_ELEMENTS(ip6.dns))
+			ip6.dns[n6++] = d;
+		else if (!strchr(d, ':') && n4 < G_N_ELEMENTS(ip4.dns))
+			ip4.dns[n4++] = d;
+	}
+	ip4.mtu = ip6.mtu = dc->mtu > 0 ? dc->mtu : 0;
+	g_free(st.address);
+	st.address = g_strdup(ip4.address);
+	st.cid = dc->cid;
+	st.connected = TRUE;
+	st.connecting = FALSE;
+	st.failures = 0;
+	log_msg("mobile data up on %s: %s, handed to NetworkManager", st.ifname,
+		ip4.address ? ip4.address : "no IPv4");
+	write_state("connected");
+	mm_connect_done(st.ifname, ip4.address ? &ip4 : NULL, ip6.address ? &ip6 : NULL, NULL);
+	g_ptr_array_free(keep, TRUE);
+}
+
+static void deactivate(void);
+
 static void configure(const RadioDataCall_1_4 *dc)
 {
 	const GBinderHidlString *s;
@@ -297,12 +379,35 @@ static void data_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp
 		dc = gbinder_reader_read_hidl_struct(&r, RadioDataCall_1_4);
 	}
 	if (dc && dc->cause == 0 && dc->active && dc->ifname.data.str && *dc->ifname.data.str) {
-		configure(dc);
+		if (!cfg.nm) {
+			configure(dc);
+		} else if (st.cancel) {
+			/* NetworkManager gave up on it meanwhile */
+			st.cid = dc->cid;
+			st.connected = TRUE;
+			deactivate();
+		} else {
+			report_up(dc);
+		}
 		return;
 	}
 	st.failures++;
 	log_msg("data call failed (status %d, error %d, cause %d); retrying", status, err,
 		dc ? dc->cause : -1);
+	if (cfg.nm) {
+		/* a few tries per request (the first often meets "ps not regi") */
+		if (st.cancel || st.failures >= 3) {
+			st.connecting = FALSE;
+			write_state("disconnected");
+			if (st.cancel)
+				mm_disconnected();
+			else
+				mm_connect_done(NULL, NULL, NULL, "the network refused the data call");
+			return;
+		}
+		schedule(10, data_cycle_cb);
+		return;
+	}
 	write_state("connecting");
 	/* 20 s, then up to 2 min between attempts */
 	schedule(MIN(20 * st.failures, 120), data_cycle_cb);
@@ -317,8 +422,11 @@ static gboolean setup_data_cb(gpointer d)
 	st.retry = 0;
 	req = radio_request_new(client, RADIO_REQ_SETUP_DATA_CALL_1_4, &w, data_done, NULL, NULL);
 	gbinder_writer_append_int32(&w, RADIO_ACCESS_NETWORK_EUTRAN);
-	s9p_write_data_profile(&w, cfg.apn, cfg.user, cfg.pass, RADIO_PDP_PROTOCOL_IPV4V6);
-	gbinder_writer_append_bool(&w, cfg.roaming);
+	if (cfg.nm)
+		s9p_write_data_profile(&w, st.apn, st.user, st.pass, RADIO_PDP_PROTOCOL_IPV4V6);
+	else
+		s9p_write_data_profile(&w, cfg.apn, cfg.user, cfg.pass, RADIO_PDP_PROTOCOL_IPV4V6);
+	gbinder_writer_append_bool(&w, cfg.nm ? st.roaming : cfg.roaming);
 	gbinder_writer_append_int32(&w, RADIO_DATA_REQUEST_REASON_NORMAL);
 	gbinder_writer_append_hidl_string_vec(&w, NULL, 0);	/* addresses */
 	gbinder_writer_append_hidl_string_vec(&w, NULL, 0);	/* dnses */
@@ -344,27 +452,57 @@ static void data_cycle(void)
 	schedule(3, setup_data_cb);
 }
 
+/* the CP has re-attached with the APN: registered as far as we can tell
+ * (libgbinder-radio misses libsec-ril's registration answers) */
+static gboolean registered_cb(gpointer d)
+{
+	(void)d;
+	st.retry = 0;
+	mm_set_state(MM_STATE_REGISTERED);
+	if (st.connecting)
+		data_cycle();
+	return G_SOURCE_REMOVE;
+}
+
 static void attach_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp,
 			RADIO_ERROR err, const GBinderReader *args, gpointer d)
 {
 	(void)req; (void)resp; (void)args; (void)d;
-	log_msg("attach APN %s: %s", cfg.apn, status == RADIO_TX_STATUS_OK && !err ? "set" : "failed");
+	log_msg("attach APN %s: %s", st.attached, status == RADIO_TX_STATUS_OK && !err ? "set" : "failed");
 	/* the CP re-attaches with it */
-	schedule(15, data_cycle_cb);
+	if (cfg.nm)
+		schedule(15, registered_cb);
+	else
+		schedule(15, data_cycle_cb);
 }
 
-static gboolean attach_cb(gpointer d)
+/* the LTE attach APN; libsec-ril forgets it at every radio power-up */
+static void attach(const char *apn, const char *user, const char *pass)
 {
 	GBinderWriter w;
 	RadioRequest *req;
 
-	(void)d;
-	st.retry = 0;
+	g_free(st.attached);
+	st.attached = g_strdup(apn);
+	if (cfg.nm)
+		mm_set_state(MM_STATE_SEARCHING);
 	req = radio_request_new(client, RADIO_REQ_SET_INITIAL_ATTACH_APN_1_4, &w, attach_done, NULL, NULL);
-	s9p_write_data_profile(&w, cfg.apn, cfg.user, cfg.pass, RADIO_PDP_PROTOCOL_IPV4V6);
+	s9p_write_data_profile(&w, apn, user, pass, RADIO_PDP_PROTOCOL_IPV4V6);
 	radio_request_set_timeout(req, 40000);
 	radio_request_submit(req);
 	radio_request_unref(req);
+}
+
+static gboolean attach_cb(gpointer d)
+{
+	(void)d;
+	st.retry = 0;
+	if (!cfg.apn) {
+		/* nothing to attach with until NetworkManager brings an APN */
+		mm_set_state(MM_STATE_REGISTERED);
+		return G_SOURCE_REMOVE;
+	}
+	attach(cfg.apn, cfg.user, cfg.pass);
 	return G_SOURCE_REMOVE;
 }
 
@@ -373,6 +511,7 @@ static void power_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP res
 {
 	(void)req; (void)resp; (void)args; (void)d;
 	log_msg("radio on: %s", status == RADIO_TX_STATUS_OK && !err ? "ok" : "failed");
+	mm_set_state(MM_STATE_ENABLED);
 	schedule(10, attach_cb);
 }
 
@@ -387,8 +526,10 @@ static void start_radio(void)
 			      cfg.operator);
 	run("%s", cmd);
 	g_free(cmd);
-	if (s9p_seh_set_data_slot(DEV, 0) || s9p_seh_mobile_data(DEV, TRUE, cfg.roaming))
+	/* with NetworkManager, roaming is its connection's call, per data call */
+	if (s9p_seh_set_data_slot(DEV, 0) || s9p_seh_mobile_data(DEV, TRUE, cfg.nm || cfg.roaming))
 		log_msg("ISehRadio not reachable: no data slot");
+	mm_set_state(MM_STATE_ENABLING);
 	req = radio_request_new(client, RADIO_REQ_SET_RADIO_POWER, &w, power_done, NULL, NULL);
 	gbinder_writer_append_bool(&w, TRUE);
 	radio_request_set_timeout(req, 40000);
@@ -425,8 +566,17 @@ static void imsi_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp
 	} else if (cfg.apn) {
 		mnc[2] = 0;	/* given by hand: the usual two digits */
 	}
-	g_free(imsi);
 	cfg.operator = g_strconcat(mcc, mnc, NULL);
+	mm_set_sim(imsi, cfg.operator, cfg.provider);
+	g_free(imsi);
+	if (!cfg.apn && cfg.nm) {
+		/* NetworkManager's connection can bring one (Settings > Mobile Network) */
+		log_msg("operator %s: no APN in %s; waiting for one from NetworkManager",
+			cfg.operator, PROVIDERS);
+		write_state("no-apn");
+		start_radio();
+		return;
+	}
 	if (!cfg.apn) {
 		log_msg("operator %s: no APN in %s; set S9P_APN in /etc/default/s9p-modem",
 			cfg.operator, PROVIDERS);
@@ -465,20 +615,190 @@ static gboolean watch_cb(gpointer d)
 	g_spawn_command_line_sync(cmd, &out, NULL, NULL, NULL);
 	g_free(cmd);
 	if (!out || !*out) {
-		log_msg("mobile data lost on %s; reconnecting", st.ifname);
 		st.connected = FALSE;
-		write_state("connecting");
-		schedule(5, data_cycle_cb);
+		if (cfg.nm) {
+			log_msg("mobile data lost on %s", st.ifname);
+			write_state("disconnected");
+			mm_disconnected();	/* NetworkManager reconnects */
+		} else {
+			log_msg("mobile data lost on %s; reconnecting", st.ifname);
+			write_state("connecting");
+			schedule(5, data_cycle_cb);
+		}
 	}
 	g_free(out);
 	return G_SOURCE_CONTINUE;
 }
 
+/* ---- signal and identity, for the desktop ---- */
+
+/* SignalStrength_1_4 as int32s: gsm 3, cdma 2, evdo 3, lte 6 (rssi asu,
+ * rsrp, rsrq, rssnr, cqi, ta), tdscdma 3, wcdma 4, nr 6 */
+static void report_signal(const GBinderReader *args)
+{
+	GBinderReader r;
+	GBinderBuffer *buf;
+	const gint32 *v;
+	int quality = -1;
+
+	gbinder_reader_copy(&r, args);
+	buf = gbinder_reader_read_buffer(&r);
+	if (!buf)
+		return;
+	v = buf->data;
+	if (buf->size >= 27 * 4) {
+		/* RSRP in -dBm: -120 (nothing usable) to -70 (excellent) */
+		if (v[9] > 0 && v[9] < 200)
+			quality = CLAMP((120 - v[9]) * 2, 0, 100);
+		else if (v[8] >= 0 && v[8] <= 31)
+			quality = v[8] * 100 / 31;
+	}
+	gbinder_buffer_free(buf);
+	if (quality >= 0)
+		mm_set_signal(quality);
+}
+
+static void signal_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp,
+			RADIO_ERROR err, const GBinderReader *args, gpointer d)
+{
+	(void)req; (void)resp; (void)d;
+	if (status == RADIO_TX_STATUS_OK && err == RADIO_ERROR_NONE)
+		report_signal(args);
+}
+
+static gboolean poll_signal_cb(gpointer d)
+{
+	RadioRequest *req;
+
+	(void)d;
+	req = radio_request_new(client, RADIO_REQ_GET_SIGNAL_STRENGTH_1_4, NULL, signal_done, NULL, NULL);
+	radio_request_set_timeout(req, 10000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+	return G_SOURCE_CONTINUE;
+}
+
+static void identity_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp,
+			  RADIO_ERROR err, const GBinderReader *args, gpointer d)
+{
+	GBinderReader r;
+	char *v;
+
+	(void)req; (void)resp;
+	if (status != RADIO_TX_STATUS_OK || err != RADIO_ERROR_NONE)
+		return;
+	gbinder_reader_copy(&r, args);
+	v = gbinder_reader_read_hidl_string(&r);	/* IMEI, or the baseband version */
+	if (GPOINTER_TO_INT(d))
+		mm_set_identity(NULL, v);
+	else
+		mm_set_identity(v, NULL);
+	g_free(v);
+}
+
+static void ask_identity(void)
+{
+	RadioRequest *req;
+
+	req = radio_request_new(client, RADIO_REQ_GET_DEVICE_IDENTITY, NULL, identity_done, NULL,
+				GINT_TO_POINTER(0));
+	radio_request_set_timeout(req, 20000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+	req = radio_request_new(client, RADIO_REQ_GET_BASEBAND_VERSION, NULL, identity_done, NULL,
+				GINT_TO_POINTER(1));
+	radio_request_set_timeout(req, 20000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+}
+
 static void indication(RadioClient *c, RADIO_IND code, const GBinderReader *args, gpointer d)
 {
-	(void)c; (void)args; (void)d;
+	(void)c; (void)d;
 	if (code == RADIO_IND_DATA_CALL_LIST_CHANGED && st.connected)
 		g_timeout_add_seconds(2, (GSourceFunc)watch_cb, NULL);
+	else if (code == RADIO_IND_CURRENT_SIGNAL_STRENGTH_1_4 && args)
+		report_signal(args);
+}
+
+/* ---- NetworkManager's requests (s9p-mm.c) ---- */
+
+void mobile_connect(const char *apn, const char *user, const char *password, gboolean roaming)
+{
+	/* NetworkManager's APN first; without one, the database's */
+	g_free(st.apn);
+	g_free(st.user);
+	g_free(st.pass);
+	st.apn = g_strdup(apn && *apn ? apn : cfg.apn ? cfg.apn : "");
+	st.user = g_strdup(apn && *apn ? user : cfg.user ? cfg.user : "");
+	st.pass = g_strdup(apn && *apn ? password : cfg.pass ? cfg.pass : "");
+	st.roaming = roaming;
+	st.connecting = TRUE;
+	st.cancel = FALSE;
+	st.failures = 0;
+	if (!*st.apn) {
+		st.connecting = FALSE;
+		mm_connect_done(NULL, NULL, NULL, "no APN: set one in Settings > Mobile Network");
+		return;
+	}
+	log_msg("NetworkManager connects with APN %s", st.apn);
+	write_state("connecting");
+	if (g_strcmp0(st.attached, st.apn)) {
+		/* the CP has to attach with it first; registered_cb goes on */
+		attach(st.apn, st.user, st.pass);
+		return;
+	}
+	data_cycle();
+}
+
+static void deactivate_done(RadioRequest *req, RADIO_TX_STATUS status, RADIO_RESP resp,
+			    RADIO_ERROR err, const GBinderReader *args, gpointer d)
+{
+	(void)req; (void)resp; (void)args; (void)d;
+	log_msg("data call %d ended: %s", st.cid,
+		status == RADIO_TX_STATUS_OK && !err ? "ok" : "error (gone already?)");
+	st.connected = FALSE;
+	st.connecting = FALSE;
+	write_state("disconnected");
+	mm_disconnected();
+}
+
+static void deactivate(void)
+{
+	GBinderWriter w;
+	RadioRequest *req;
+
+	req = radio_request_new(client, RADIO_REQ_DEACTIVATE_DATA_CALL_1_2, &w, deactivate_done, NULL, NULL);
+	gbinder_writer_append_int32(&w, st.cid);
+	gbinder_writer_append_int32(&w, RADIO_DATA_REQUEST_REASON_NORMAL);
+	radio_request_set_timeout(req, 20000);
+	radio_request_submit(req);
+	radio_request_unref(req);
+}
+
+void mobile_disconnect(void)
+{
+	if (st.connected) {
+		deactivate();
+	} else if (st.connecting) {
+		/* data_done ends it, or the next attempt is not made */
+		st.cancel = TRUE;
+		if (st.retry) {
+			/* between attempts, or attaching: stop there */
+			g_source_remove(st.retry);
+			st.retry = 0;
+			st.connecting = FALSE;
+			mm_set_state(MM_STATE_REGISTERED);
+			mm_disconnected();
+		}
+	} else {
+		mm_disconnected();
+	}
+}
+
+void mobile_enable(gboolean on)
+{
+	log_msg("NetworkManager: mobile broadband %s", on ? "on" : "off");
 }
 
 static gboolean connect_cb(gpointer d)
@@ -493,6 +813,10 @@ static gboolean connect_cb(gpointer d)
 	/* give libsec-ril time to read the SIM */
 	schedule(5, get_imsi_cb);
 	g_timeout_add_seconds(30, watch_cb, NULL);
+	if (cfg.nm) {
+		ask_identity();
+		g_timeout_add_seconds(30, poll_signal_cb, NULL);
+	}
 	return G_SOURCE_REMOVE;
 }
 
@@ -511,8 +835,11 @@ int main(void)
 	}
 	cfg.roaming = !g_ascii_strcasecmp(env("S9P_DATA_ROAMING", "no"), "yes");
 	cfg.metric = atoi(env("S9P_DATA_METRIC", "750"));
+	cfg.nm = !!g_ascii_strcasecmp(env("S9P_MOBILE_NETWORKMANAGER", "yes"), "no");
 	write_state("starting");
 	loop = g_main_loop_new(NULL, FALSE);
+	if (cfg.nm)
+		mm_start();
 	if (connect_cb(NULL))
 		g_timeout_add_seconds(5, connect_cb, NULL);
 	g_main_loop_run(loop);

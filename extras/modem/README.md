@@ -17,10 +17,12 @@ partitions mounted read-only as a chroot:
   read-only, what the CP writes goes to `/var/lib/s9p-modem/efs`.
 - Test it with `s9p-radio` (`src/modem/userspace`, needs libgbinder-radio):
   `status`, `on`, `pin`, `dial`, `hangup`. `s9p-logcat` shows rild's log.
-- `s9p-mobile.service`: mobile data at every boot (LTE), behind Wi-Fi;
-  settings in `/etc/default/s9p-modem`.
+- `s9p-mobile.service`: mobile data at every boot (LTE), behind Wi-Fi, in
+  GNOME like any modem (Quick Settings, Settings > Mobile Network): it
+  serves ModemManager's D-Bus API and NetworkManager's "Mobile data"
+  connection uses it. Settings in `/etc/default/s9p-modem`.
 - Not there yet: calls (they need VoLTE on networks without 3G), call
-  audio, SMS, a toggle in GNOME.
+  audio, SMS.
 - Never unload `s9p-modem`: it oopses, and the reboot after it hangs. Remove
   the feature and reboot instead.
 - Needs the module from `scripts/build/build_extras.sh` in `dist/extras/`.

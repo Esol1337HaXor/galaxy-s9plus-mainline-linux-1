@@ -18,6 +18,12 @@ install -m644 "$SRC"/modem/s9p-noselinux.so /usr/local/lib/s9p-modem/
 install -m755 "$SRC"/modem/s9p-mobile "$SRC"/modem/s9p-radio /usr/local/bin/
 # the settings, once: a reinstall keeps the user's
 [ -e /etc/default/s9p-modem ] || install -m644 /usr/local/share/s9p-modem/default /etc/default/s9p-modem
+# NetworkManager's mobile data connection, the same way (keyfiles must be 600)
+C=/etc/NetworkManager/system-connections/mobile-data.nmconnection
+[ -e "$C" ] || install -m600 /usr/local/share/s9p-modem/mobile-data.nmconnection "$C"
+# s9p-mobile owns ModemManager's name on the system bus
+systemctl reload dbus.service 2>/dev/null || true
+nmcli connection reload 2>/dev/null || true
 mkdir -p /var/lib/s9p-extras && touch /var/lib/s9p-extras/modem
 depmod -a "$K"
 udevadm control --reload
