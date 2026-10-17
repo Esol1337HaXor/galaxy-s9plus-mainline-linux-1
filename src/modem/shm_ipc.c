@@ -116,11 +116,11 @@ static ssize_t memshare_read(struct file *filep, char __user *buf,
 		goto ramdump_done;
 	}
 
-	if (copy_to_user(buf, device_mem, copy_size)) {
+	if (copy_to_user(buf, (void __force *)device_mem, copy_size)) {
 		pr_err("%s(%s): Couldn't copy all data to user.", __func__,
 				rd_dev->name);
 		ret = -EFAULT;
-		vunmap(device_mem);
+		iounmap(device_mem);
 		goto ramdump_done;
 	}
 
@@ -129,7 +129,7 @@ static ssize_t memshare_read(struct file *filep, char __user *buf,
 	pr_debug("%s(%s): Read %d bytes from address %lx.", __func__,
 			pdata.name, copy_size, addr);
 	
-	vunmap(device_mem);
+	iounmap(device_mem);
 
 	return copy_size;
 
@@ -327,38 +327,17 @@ int shm_get_security_param2(unsigned long mode, u32 bl_size, unsigned long *para
 	return ret;
 }
 
+/*
+ * Vendor: vmap() of phys_to_page() of the region, write-combined. The CP
+ * regions are no-map reservations (outside the linear map), and the ACPM
+ * dump region is the APM's SRAM, which has no struct page at all: map
+ * both as write-combined I/O memory instead.
+ */
 void __iomem *shm_request_region(unsigned long sh_addr, unsigned size)
 {
-	int i;
-	unsigned int num_pages = (size >> PAGE_SHIFT);
-	pgprot_t prot = pgprot_writecombine(PAGE_KERNEL);
-	struct page **pages;
-	void *v_addr;
-
-	if (!sh_addr)
+	if (!sh_addr || !size)
 		return NULL;
-
-	if (size > (num_pages << PAGE_SHIFT))
-		num_pages++;
-
-	pages = kmalloc(sizeof(struct page *) * num_pages, GFP_ATOMIC);
-	if (!pages) {
-		pr_err("%s: pages allocation fail!\n", __func__);
-		return NULL;
-	}
-
-	for (i = 0; i < (num_pages); i++) {
-		pages[i] = phys_to_page(sh_addr);
-		sh_addr += PAGE_SIZE;
-	}
-
-	v_addr = vmap(pages, num_pages, VM_MAP, prot);
-	if (v_addr == NULL)
-		pr_err("%s: Failed to vmap pages\n", __func__);
-
-	kfree(pages);
-
-	return (void __iomem *)v_addr;
+	return ioremap_wc(sh_addr, size);
 }
 
 void __iomem *shm_get_boot_region(void)
@@ -381,7 +360,7 @@ void __iomem *shm_get_ipc_region(void)
 void __iomem *shm_get_zmb_region(void)
 {
 	if (!pdata.v_zmb)
-		pdata.v_zmb = (void __iomem *)phys_to_virt(pdata.p_addr + pdata.zmb_off);
+		pdata.v_zmb = shm_request_region(pdata.p_addr + pdata.zmb_off, pdata.zmb_size);
 
 	return pdata.v_zmb;
 }
@@ -417,29 +396,29 @@ void __iomem *shm_get_cplog_region(void)
 
 void shm_release_region(void *v_addr)
 {
-	vunmap(v_addr);
+	iounmap(v_addr);
 }
 
 void shm_release_regions(void)
 {
 	if (pdata.v_boot)
-		vunmap(pdata.v_boot);
+		iounmap(pdata.v_boot);
 
 	if (pdata.v_ipc)
-		vunmap(pdata.v_ipc);
+		iounmap(pdata.v_ipc);
 
 	if (pdata.v_vss)
-		vunmap(pdata.v_vss);
+		iounmap(pdata.v_vss);
 
 	if (pdata.v_acpm)
-		vunmap(pdata.v_acpm);
+		iounmap(pdata.v_acpm);
 
 	if (pdata.v_zmb)
-		vunmap(pdata.v_zmb);
+		iounmap(pdata.v_zmb);
 
 #ifdef CONFIG_CP_RAM_LOGGING
 	if (pdata.v_cplog)
-		vunmap(pdata.v_cplog);
+		iounmap(pdata.v_cplog);
 #endif
 }
 
@@ -607,7 +586,7 @@ static int shm_probe(struct platform_device *pdev)
 	memcpy(&cp_mem_map, cp_mem_base + 0x200 + 0xa0, sizeof(struct cp_reserved_map_table));
 
 	if (cp_mem_base) {
-		vunmap(cp_mem_base);
+		iounmap(cp_mem_base);
 		cp_mem_base = NULL;
 	}
 
@@ -697,6 +676,9 @@ static int shm_probe(struct platform_device *pdev)
 		/* To do: In case of non-DT */
 	}
 
+	/* stock DT acpm_ipc: dump-base/dump-size, the APM SRAM the CP dumps into */
+	pdata.p_acpm_addr = 0x0203c000;
+	pdata.acpm_size = 0x1d000;
 	if (np_acpm) {
 		ret = of_property_read_u32(np_acpm, "dump-base",
 				&pdata.p_acpm_addr);

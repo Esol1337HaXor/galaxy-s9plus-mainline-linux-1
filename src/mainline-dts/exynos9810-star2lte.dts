@@ -1072,3 +1072,393 @@
 		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
 	};
 };
+
+/*
+ * Modem (Shannon CP): the nodes Samsung's modem_v1, mcu_ipc and shm_ipc
+ * drivers read (src/modem, s9p-modem.ko), copied from the SM-G965F's stock
+ * device tree. Dropped: phandles, and the gpios/pinctrl of boards with an
+ * external modem (the CP is on-chip here). The CP regions themselves are
+ * the reserved-memory nodes modem@f0000000 and cp-logging@f9200000 above.
+ */
+&{/} {
+	mcu_ipc@14170000 {
+		compatible = "samsung,exynos-shd-ipc-mailbox";
+		reg = <0x0 0x14170000 0x180>;
+		mcu,name = "mcu_ipc_cp";
+		mcu,id = <0x0>;
+		interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
+		mcu,irq_affinity_mask = <0x3>;
+	};
+	shmem@f6e00000 {
+		compatible = "samsung,exynos-shm_ipc";
+		shmem,cp_size = <0x7900000>;
+		shmem,vss_size = <0x700000>;
+		shmem,ipc_offset = <0x8000000>;
+		shmem,ipc_size = <0x500000>;
+		shmem,zmb_offset = <0x8500000>;
+		shmem,zmb_size = <0xb00000>;
+	};
+	mif_pdata {
+		reg = <0x0 0x10000 0x0>;
+		compatible = "sec_modem,modem_pdata";
+		status = "okay";
+		interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 440 IRQ_TYPE_LEVEL_HIGH>;
+		mif,name = "ss360ap";
+		mif,modem_net = <0x0>;
+		mif,modem_type = <0xa>;
+		mif,use_handover = <0x0>;
+		mif,ipc_version = <0x32>;
+		mif,link_types = <0x200>;
+		mif,link_name = "shmem";
+		mif,link_attrs = <0x7c9>;
+		mif,num_iodevs = <0x15>;
+		mif,buff_offset = <0x500000>;
+		mif,buff_size = <0x900000>;
+		mbx_ap2cp_msg = <0x0>;
+		mbx_cp2ap_msg = <0x1>;
+		mbx_ap2cp_united_status = <0x2>;
+		mbx_cp2ap_united_status = <0x3>;
+		mbx_ap2cp_mif_value = <0x4>;
+		mbx_ap2cp_kerneltime = <0x9>;
+		mif,int_ap2cp_msg = <0x0>;
+		mif,int_ap2cp_wakeup = <0x1>;
+		mif,int_ap2cp_status = <0x2>;
+		mif,int_ap2cp_active = <0x3>;
+		mif,int_ap2cp_smapper = <0x4>;
+		mif,irq_cp2ap_msg = <0x0>;
+		mif,irq_cp2ap_status = <0x2>;
+		mif,irq_cp2ap_active = <0x3>;
+		mif,irq_cp2ap_smapper = <0x4>;
+		mif,irq_cp2ap_wakelock = <0x8>;
+		mif,irq_cp2ap_ratmode = <0x9>;
+		mbx_cp2ap_dvfsreq_cpu = <0x5>;
+		mbx_cp2ap_dvfsreq_mif = <0x6>;
+		mbx_cp2ap_dvfsreq_int = <0x7>;
+		mif,irq_cp2ap_perf_req_cpu = <0x5>;
+		mif,irq_cp2ap_perf_req_mif = <0x6>;
+		mif,irq_cp2ap_perf_req_int = <0x7>;
+		sbi_cp_rat_mode_mask = <0x3f>;
+		sbi_cp_rat_mode_pos = <0x1a>;
+		sbi_cp_evs_mode_mask = <0x1>;
+		sbi_cp_evs_mode_pos = <0x7>;
+		sbi_cp_wakelock_mask = <0x1>;
+		sbi_cp_wakelock_pos = <0x6>;
+		sbi_lte_active_mask = <0x1>;
+		sbi_lte_active_pos = <0x5>;
+		sbi_cp_status_mask = <0xf>;
+		sbi_cp_status_pos = <0x1>;
+		sbi_cp_smapper_mask = <0x1>;
+		sbi_cp_smapper_pos = <0x4>;
+		sbi_cp2ap_wakelock_mask = <0x1>;
+		sbi_cp2ap_wakelock_pos = <0x6>;
+		sbi_pda_active_mask = <0x1>;
+		sbi_pda_active_pos = <0x5>;
+		sbi_ap_status_mask = <0xf>;
+		sbi_ap_status_pos = <0x1>;
+		sbi_ap2cp_wakelock_mask = <0x1>;
+		sbi_ap2cp_wakelock_pos = <0x0>;
+		sbi_crash_type_mask = <0xf>;
+		sbi_crash_type_pos = <0x17>;
+		sbi_device_type_mask = <0x1f>;
+		sbi_device_type_pos = <0x12>;
+		sbi_ext_backtrace_mask = <0x1>;
+		sbi_ext_backtrace_pos = <0x11>;
+		sbi_ds_det_mask = <0x3>;
+		sbi_ds_det_pos = <0xe>;
+		sbi_sys_rev_mask = <0xff>;
+		sbi_sys_rev_pos = <0x6>;
+		sbi_lockval_cp2ap_dvfsreq_endian_mask = <0x1>;
+		sbi_lockval_cp2ap_dvfsreq_endian_pos = <0x1f>;
+		sbi_lockval_cp2ap_dvfsreq_index_mask = <0x7fff>;
+		sbi_lockval_cp2ap_dvfsreq_index_pos = <0x0>;
+		sbi_ap2cp_kerneltime_sec_mask = <0xfff>;
+		sbi_ap2cp_kerneltime_sec_pos = <0x14>;
+		sbi_ap2cp_kerneltime_usec_mask = <0xfffff>;
+		sbi_ap2cp_kerneltime_usec_pos = <0x0>;
+
+		iodevs {
+
+			io_device_0 {
+				iod,name = "umts_cass";
+				iod,id = <0x23>;
+				iod,format = <0x1>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,max_tx_size = <0x800>;
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x10>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_1 {
+				iod,name = "umts_ipc0";
+				iod,id = <0xeb>;
+				iod,format = <0x0>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,app = "RIL";
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x1000>;
+				iod,dl_num_buffers = <0x20>;
+				iod,dl_buffer_size = <0x1000>;
+			};
+
+			io_device_2 {
+				iod,name = "umts_ipc1";
+				iod,id = <0xec>;
+				iod,format = <0x0>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,app = "RIL";
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x1000>;
+				iod,dl_num_buffers = <0x20>;
+				iod,dl_buffer_size = <0x1000>;
+			};
+
+			io_device_3 {
+				iod,name = "umts_rfs0";
+				iod,id = <0xf5>;
+				iod,format = <0x2>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,app = "RFS";
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x200>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_4 {
+				iod,name = "umts_csd";
+				iod,id = <0x1>;
+				iod,format = <0x1>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,app = "CSVT";
+				iod,ul_num_buffers = <0x20>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x40>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_5 {
+				iod,name = "umts_router";
+				iod,id = <0x19>;
+				iod,format = <0x1>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,app = "Data Router";
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x10>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_6 {
+				iod,name = "umts_dm0";
+				iod,id = <0x1c>;
+				iod,format = <0x1>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x82>;
+				iod,app = "DIAG";
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x80>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_7 {
+				iod,name = "rmnet0";
+				iod,id = <0xa>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,app = "NET";
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_8 {
+				iod,name = "rmnet1";
+				iod,id = <0xb>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,app = "NET";
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_9 {
+				iod,name = "rmnet2";
+				iod,id = <0xc>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,app = "NET";
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_10 {
+				iod,name = "rmnet3";
+				iod,id = <0xd>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,app = "NET";
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_11 {
+				iod,name = "rmnet4";
+				iod,id = <0xe>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_12 {
+				iod,name = "rmnet5";
+				iod,id = <0xf>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_13 {
+				iod,name = "rmnet6";
+				iod,id = <0x10>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_14 {
+				iod,name = "rmnet7";
+				iod,id = <0x11>;
+				iod,format = <0x1>;
+				iod,io_type = <0x1>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,ul_num_buffers = <0x0>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x0>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_15 {
+				iod,name = "multipdp_hiprio";
+				iod,id = <0x0>;
+				iod,format = <0x3>;
+				iod,io_type = <0x2>;
+				iod,links = <0x200>;
+				iod,attrs = <0x180>;
+				iod,app = "RIL";
+				iod,ul_num_buffers = <0x100>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x100>;
+				iod,dl_buffer_size = <0x800>;
+			};
+
+			io_device_16 {
+				iod,name = "multipdp";
+				iod,id = <0x0>;
+				iod,format = <0x3>;
+				iod,io_type = <0x2>;
+				iod,links = <0x200>;
+				iod,attrs = <0x3180>;
+				iod,app = "RIL";
+				iod,ul_num_buffers = <0x200>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x800>;
+				iod,dl_buffer_size = <0x8>;
+			};
+
+			io_device_17 {
+				iod,name = "umts_boot0";
+				iod,id = <0xd7>;
+				iod,format = <0x4>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x2>;
+				iod,app = "CBD";
+			};
+
+			io_device_18 {
+				iod,name = "umts_ramdump0";
+				iod,id = <0xe1>;
+				iod,format = <0x5>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x202>;
+				iod,app = "CBD";
+			};
+
+			io_device_19 {
+				iod,name = "smd4";
+				iod,id = <0x21>;
+				iod,format = <0x1>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x882>;
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x80>;
+				iod,dl_buffer_size = <0x800>;
+				iod,option_region = "kor_skt";
+			};
+
+			io_device_20 {
+				iod,name = "umts_ciq0";
+				iod,id = <0x1a>;
+				iod,format = <0x1>;
+				iod,io_type = <0x0>;
+				iod,links = <0x200>;
+				iod,attrs = <0x882>;
+				iod,ul_num_buffers = <0x10>;
+				iod,ul_buffer_size = <0x800>;
+				iod,dl_num_buffers = <0x80>;
+				iod,dl_buffer_size = <0x800>;
+				iod,option_region = "usa_att";
+			};
+		};
+	};
+};
