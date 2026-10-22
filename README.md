@@ -3,6 +3,9 @@
 Ubuntu 24.04 LTS arm64 for the Exynos Samsung Galaxy S9+ (`SM-G965F`,
 `star2lte`), running GNOME 46 on Wayland and mainline Linux 7.1.
 
+<img width="1920" height="1080" alt="Screenshot from 2026-10-18 01-48-24" src="https://github.com/user-attachments/assets/00224d60-b04a-4e3e-be59-0795a7f5d1c5" />
+
+
 This is a fork of [SheroAbi/galaxy-s9plus-mainline-linux](https://github.com/SheroAbi/galaxy-s9plus-mainline-linux),
 the port that brought mainline Linux and Ubuntu to this phone. On top of it,
 this fork adds an **external monitor over USB-C**, **USB host** on hubs and
