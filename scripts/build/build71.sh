@@ -307,15 +307,19 @@ cfg --enable SCSI_UFS_EXYNOS9810
 # Samsung's inline crypto (FMP) is not wired up here; let the core ignore the
 # controller's crypto capability rather than half-enable it.
 cfg --disable SCSI_UFS_CRYPTO
-# USB gadget. GADGET=serial (default) builds the legacy g_serial in: it binds
-# the UDC before userspace exists and needs nothing from the rootfs, which is
-# what a bring-up wants. GADGET=configfs leaves the UDC to the rootfs'
-# usb-gadget.service instead (ACM console plus an NCM network for SSH).
+# USB gadget. GADGET=configfs (default: the proven operating mode) leaves the
+# UDC to the rootfs' usb-gadget.service (ACM console plus an NCM network for
+# SSH). GADGET=serial builds the legacy g_serial in: it binds the UDC before
+# userspace exists and needs nothing from the rootfs -- a bare bring-up wants
+# that, but it also steals the UDC from usb-gadget.service, which kills SSH
+# on a running rootfs. That is what the 16:59 build on 29.10. shipped (the
+# old default was serial): the phone booted, NCM never came up, it was
+# unreacheable and had to be recovered through TWRP.
 cfg --enable USB_GADGET
 cfg --enable USB_LIBCOMPOSITE
 cfg --enable USB_U_SERIAL
 cfg --enable USB_F_ACM
-if [ "${GADGET:-serial}" = configfs ]; then
+if [ "${GADGET:-configfs}" = configfs ]; then
 	echo "GADGET=configfs: no legacy gadget, functions for the rootfs service"
 	cfg --disable USB_G_SERIAL
 	cfg --enable USB_CONFIGFS
@@ -332,6 +336,25 @@ if [ "${GADGET:-serial}" = configfs ]; then
 	cfg --enable USB_U_ETHER
 else
 	cfg --enable USB_G_SERIAL
+fi
+# Final config guard: everything this phone needs, checked AFTER every cfg
+# loop above ran -- this is the config that actually builds. The first guard
+# only covered the strip dance; a config that lost a needed symbol later (or
+# one that shipped the wrong gadget variant) still produced a boot.img that
+# starts but never gets an NCM link (no SSH): the 16:59 build on 29.10.
+for sym in SERIAL_SAMSUNG I2C_S3C2410 SPI_S3C64XX ARM_SCMI_PROTOCOL EXYNOS_THERMAL \
+  MFD_EXYNOS_LPASS MFD_SEC_ACPM REGULATOR_ARM_SCMI \
+  USB_GADGET USB_LIBCOMPOSITE USB_CONFIGFS USB_F_NCM USB_F_ACM USB_F_FS \
+  SCSI SCSI_UFSHCD SCSI_UFS_EXYNOS9810 BLK_DEV_SD \
+  DRM DRM_EXYNOS_BOOTFB DRM_FBDEV_EMULATION FRAMEBUFFER_CONSOLE \
+  ARCH_EXYNOS PINCTRL_EXYNOS CPU_FREQ DMA_CMA; do
+  grep -q "^CONFIG_${sym}=" out/.config || { echo "config guard (final): CONFIG_${sym} lost"; exit 1; }
+done
+# With configfs the legacy g_serial must be off: it binds the UDC itself and
+# steals it from usb-gadget.service, which then never gets the NCM up.
+if [ "${GADGET:-configfs}" = configfs ] && grep -q "^CONFIG_USB_G_SERIAL=" out/.config; then
+  echo "config guard (final): USB_G_SERIAL present -- g_serial steals the UDC from usb-gadget.service (no SSH)"
+  exit 1
 fi
 # "depends on TYPEC || !TYPEC": with TYPEC=m the PHY driver is capped at m,
 # and the rootfs has no modules for this kernel. Nothing here needs Type-C.
