@@ -142,8 +142,20 @@
  * internal boost converter needs 120 ms before it can be told to display
  * again. Sending set_display_on too early leaves the panel dark.
  */
-#define PANEL_SLEEP_DELAY_MS		120
+#define PANEL_SLEEP_DELAY_MS		250
 #define PANEL_FRAME_DELAY_MS		20
+
+/*
+ * After set_display_on the panel's boost converter and gate driver are
+ * still settling (the MIPI DCS spec allows 120 ms for this). A trigger
+ * arriving during that window makes the panel latch a half-drawn frame
+ * into its own frame memory -- on screen that is horizontal stripe
+ * corruption that survives every subsequent frame until the next full
+ * panel reinit (reboot). Short screen off/on cycles hit exactly this
+ * window, so the first flip after a power-on must wait the settling
+ * time out before it arms the trigger.
+ */
+#define PANEL_ON_DELAY_MS		300
 
 /*
  * Sending the panel DCS display-off is the difference between a black
@@ -408,6 +420,11 @@ static void s9p_decon_pipe_enable(struct drm_simple_display_pipe *pipe,
 	 * configuration itself is never touched.
 	 */
 	s9p_panel_up(priv);
+	/*
+	 * Let the panel finish settling after set_display_on before the
+	 * first flip arms the trigger (see PANEL_ON_DELAY_MS above).
+	 */
+	msleep(PANEL_ON_DELAY_MS);
 	obj = to_drm_gem_dma_obj(plane_state->fb->obj[0]);
 	s9p_wait_shadow_idle(priv);
 	s9p_decon_program_address(priv, obj->dma_addr);
