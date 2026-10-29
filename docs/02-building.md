@@ -115,6 +115,43 @@ All of them are environment variables.
 8. Packs `dt.img` with `mkdtbh.py` and the boot image with `mkboot.py`,
    which also appends `SEANDROIDENFORCE`.
 
+### The stable config and the guard
+
+The strip dance in `build71.sh` only names what it turns off. This phone's
+platform drivers (`SERIAL_SAMSUNG`, `I2C_S3C2410`, `SPI_S3C64XX`,
+`MFD_EXYNOS_LPASS`, `MFD_SEC_ACPM`, `EXYNOS_ACPM_PROTOCOL`,
+`ARM_SCMI_PROTOCOL`, `EXYNOS_THERMAL` and about 120 more) are in no loop: on
+a shared `BUILD` tree they were added to `out/.config` by hand across earlier
+sessions. A foreign `.config` (another port's build over the same tree)
+silently loses them — no serial (the Bluetooth UART), no I2C codec, no LPASS,
+no PMIC rails: audio lands on the dummy device and Bluetooth disappears, with
+no build error to show for it.
+
+`scripts/build/kernel.config.stable` pins the config of a known-good build.
+`build71.sh` installs it over `out/.config` before the loops run (the loops
+then re-apply this port's own options on top, so `FRESH_CONFIG` is rarely
+needed), and a guard after `olddefconfig` stops the build if any of eight
+critical symbols is lost:
+
+```
+config guard: CONFIG_SERIAL_SAMSUNG lost
+```
+
+If the guard trips, do not disable it: capture `out/.config` of a good build
+into `scripts/build/kernel.config.stable` instead.
+
+### The panel sleep workaround
+
+`build_stable.sh` sets `s9p_decon.panel_sleep=0` on the boot command line.
+With it the DECON driver only sends `set_display_off` when the display blanks
+and never puts the panel into MIPI sleep mode. On this panel entering sleep
+loses the panel's initialization: the first wake-up after the first lock
+latches stripes and blotches over everything, immediately, whatever delay the
+driver waits before or after `set_display_on`. With the panel kept out of
+sleep the locked screen still goes fully dark. The parameter is a module
+option, so it can also be flipped at runtime through
+`/sys/module/s9p_decon/parameters/panel_sleep`.
+
 ### text_offset — why a mainline kernel does nothing at all here
 
 | | Samsung 4.9 | mainline 7.1 |

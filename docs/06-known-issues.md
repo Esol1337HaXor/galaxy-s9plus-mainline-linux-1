@@ -161,6 +161,21 @@ the next boot dead in sboot: no USB, no watchdog, until Power + Volume Down
 were held for ten seconds; the forced reset cleared them all again. INFORM1
 is the resume-from-sleep flag on Exynos, the likeliest culprit.
 
+## Stripes over everything after the first blank (found 2026-10-29, fixed)
+
+After the first lock/unlock cycle the panel showed stripes and blotches over
+everything, immediately, and they stayed until a reboot. No delay around
+`set_display_on` changed it (120 ms, 300 ms after the command, 250 ms between
+`exit_sleep_mode` and `set_display_on` — none of it mattered). What mattered
+was the MIPI sleep cycle itself: on this panel `enter_sleep_mode` loses the
+panel's initialization, and the first wake-up after the first sleep comes up
+broken, like a hardware defect that only appears after locking.
+
+The fix keeps the panel out of sleep: `s9p_decon.panel_sleep=0` on the boot
+command line (set by `build_stable.sh`). The driver then only sends
+`set_display_off` when the display blanks, and the locked screen still goes
+fully dark. See [02-building.md](02-building.md).
+
 ## Reading the sboot framebuffer resets the SoC
 
 Mapping `0xcc000000` through `/dev/mem` resets the phone (`RST_STAT
