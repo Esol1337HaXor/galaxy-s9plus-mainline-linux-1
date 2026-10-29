@@ -33,6 +33,12 @@ module_param(height, uint, 0444);
 static bool link_en;
 module_param(link_en, bool, 0644);
 MODULE_PARM_DESC(link_en, "also enable the CSIS1 link (the vendor leaves it off in pattern mode)");
+static bool vendor_en = true;
+module_param(vendor_en, bool, 0644);
+MODULE_PARM_DESC(vendor_en, "run the vendor csi_hw_enable: UPDATE_SHADOW=0xF, PHY on, QCHANNEL off, CSI_EN");
+static unsigned int dma_ctrl = 2;
+module_param(dma_ctrl, uint, 0444);
+MODULE_PARM_DESC(dma_ctrl, "DMA0_CTRL at start: 2 = UPDT_PTR_EN only (bit0 is DMA_DISABLE per vendor fields), 3 = +bit0");
 static bool pack12 = true;
 module_param(pack12, bool, 0644);
 MODULE_PARM_DESC(pack12, "DMA0_FMT.PACK12 (RAW10 packed); 0: 16 bit per pixel");
@@ -96,7 +102,7 @@ static int capture(void)
 	writel(0x00f11f00, cmn + 0x04);
 	for (i = 0; i < 8; i++)
 		writel(lower_32_bits(buf_pa), dma + 0x10 + 4 * i);
-	writel(0x3, dma + 0x00);
+	writel(dma_ctrl, dma + 0x00);
 
 	/* common DMA and its test pattern, 30 fps at a 200 MHz bus, 2 ppc */
 	rmw(common + 0x00, 0xf, 0x6);
@@ -109,15 +115,29 @@ static int capture(void)
 	writel(BIT(30) | (vblank & GENMASK(29, 0)), common + 0x20);
 	writel(BIT(31) | BIT(30) | (vblank & GENMASK(29, 0)), common + 0x20);
 
+	/* vendor csi_hw_enable (fimc-is-hw-csi-v5_1.c): the missing start
+	 * steps. Without UPDATE_SHADOW the CSIS keeps the reset values of
+	 * every register written above; without the PHY there is no receive
+	 * path at all. Q-channel off (ENABLE_HWACG_CONTROL), then CSI_EN.
+	 */
+	if (vendor_en) {
+		rmw(csis + 0x04, 0xF << 16, 0xF << 16);	/* UPDATE_SHADOW = 0xF */
+		rmw(csis + 0x704, 0xF << 1, 0x3 << 1);	/* PHY: ENABLE_DAT = lanes */
+		rmw(csis + 0x704, 0, BIT(0));		/* PHY: ENABLE_CLK = 1 */
+		rmw(csis + 0x04, BIT(20), 0);		/* QCHANNEL_EN = 0 */
+		rmw(csis + 0x04, 0, BIT(0));		/* CSI_EN = 1 */
+	}
+
 	ret = readl_poll_timeout(cmn + 0x08, s, s & BIT(8), 1000, 1000000);
 	writel(0, dma + 0x00);
 	rmw(csis + 0x04, BIT(0), 0);
 	rmw(common + 0x20, BIT(31), 0);
 	last_src = s;
 	writel(s, cmn + 0x08);
-	pr_info("s9p-csis: %s, DMA int src %08x act %08x frames %08x mmu int %08x\n",
+	pr_info("s9p-csis: %s, DMA int src %08x act %08x frames %08x dma err %08x phy %08x mmu int %08x\n",
 		ret ? "no frame end" : "frame captured", s, readl(dma + 0x30),
-		readl(csis + 0x100), readl(mmu + 0x60));
+		readl(csis + 0x100), readl(cmn + 0x18), readl(csis + 0x700),
+		readl(mmu + 0x60));
 	return ret;
 }
 
@@ -212,6 +232,9 @@ static void __exit s9p_csis_test_exit(void)
 	writel(0, dma + 0x00);
 	rmw(common + 0x20, BIT(31), 0);
 	writel(0, cmn + 0x04);
+	rmw(csis + 0x04, BIT(0), 0);		/* CSI_EN off */
+	rmw(csis + 0x704, BIT(0), 0);		/* PHY clock off */
+	rmw(csis + 0x04, BIT(20), BIT(20));	/* QCHANNEL_EN back on */
 	debugfs_remove_recursive(dir);
 	dma_free_coherent(&pdev->dev, BUF_SIZE, buf, buf_pa);
 	platform_device_unregister(pdev);
