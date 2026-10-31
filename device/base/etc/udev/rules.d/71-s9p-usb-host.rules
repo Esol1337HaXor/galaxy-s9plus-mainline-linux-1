@@ -1,9 +1,14 @@
-# S9+: USB-Host-Role nach Hotplug wiederherstellen
-# PROBLEM: Beim Abziehen des USB-C-Adapters faellt der s9p-usbhost in den
-# device-Modus (role device, xhci-Busse werden deregistert). Beim Wiederanstecken
-# kehrt nur der DP-Teil (Video) zurueck, der USB-Host (und damit der Touchscreen
-# des externen Monitors) nicht.
+# S9+: USB-Host nach Hotplug wiederherstellen (Re-Enumeration erzwingen)
+# PROBLEM: Beim Abziehen des USB-C-Adapters stirbt der USB-Host auf 2 Arten:
+#   A) role faellt auf device (peripheral) — xhci-Busse werden deregistert
+#   B) role bleibt host, aber die Enumeration schlaegt fehl (nur Root-Ports
+#      bleiben; Hub 1-1 + externer Touch fehlen). Ein reines "echo host" ist
+#      dann ein No-Op — deshalb Rehost-Toggle via s9p-usb-rehost.sh.
+# TOUCH-WAKE: Ohne wch-Touch kann der GNOME-Bildschirm-Blank nicht per Touch
+# aufgeweckt werden ("man kommt nicht mehr raus") — deshalb ist die
+# USB-Wiederherstellung zwingend.
 # FIX: Beim change-Event des USBC-Controllers (i2c 1-0025, MAX77705) bzw. des
-# s9p-dp-Treibers den Role-Switch zurueck auf host setzen.
-ACTION=="change", SUBSYSTEM=="i2c", KERNEL=="1-0025", RUN+="/bin/sh -c '/bin/echo host > /sys/class/usb_role/10c00000.usb-role-switch/role'"
-ACTION=="change", SUBSYSTEM=="platform", KERNEL=="s9p-dp", RUN+="/bin/sh -c '/bin/echo host > /sys/class/usb_role/10c00000.usb-role-switch/role'"
+# s9p-dp-Treibers das Rehost-Skript aufrufen (Guard: nur wenn USB tot).
+ACTION=="change", SUBSYSTEM=="i2c", KERNEL=="1-0025", RUN+="/usr/bin/s9p-usb-rehost.sh"
+ACTION=="change", SUBSYSTEM=="platform", KERNEL=="s9p-dp", RUN+="/usr/bin/s9p-usb-rehost.sh"
+
