@@ -1,0 +1,10 @@
+[Unit]
+Description=S9+ Auto-Dock: USB-Rehost + DP-only-Anzeige beim Boot
+After=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/s9p-dock-setup.sh
+
+[Install]
+WantedBy=graphical.target
