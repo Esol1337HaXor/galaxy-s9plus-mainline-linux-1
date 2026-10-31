@@ -21,10 +21,12 @@
  * the bus speeds the driver computes are upper bounds (slower is safe).
  */
 
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 
 static struct of_changeset *cs;
@@ -135,6 +137,26 @@ module_param_cb(rst, &rst_ops, &rst, 0644);
 MODULE_PARM_DESC(rst, "front sensor reset (gpg2-5): 1 = running");
 module_param_cb(mclk, &mclk_ops, &mclk, 0644);
 MODULE_PARM_DESC(mclk, "front sensor master clock on gpc1-5 (26 MHz)");
+
+/* Register dump for bring-up diagnosis: are the pins and clocks really
+ * where the module left them? */
+static int regs_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "gpg2       con %08x dat %08x (rst pin 5, bits 20-23)\n",
+		   rd(GPG2), rd(GPG2 + 4));
+	seq_printf(m, "gpc1       con %08x dat %08x (mclk pin 5, bits 20-23)\n",
+		   rd(GPC1), rd(GPC1 + 4));
+	seq_printf(m, "gpp5       con %08x (usi08 sda/scl pins 2-3, usi09 4-5)\n",
+		   rd(GPP5));
+	seq_printf(m, "gpp6       con %08x (usi10 pins 0-1)\n", rd(GPP6));
+	seq_printf(m, "us08       con %08x opt %08x int_en %08x conf %08x\n",
+		   rd(0x108f00c4), rd(0x108f00c8), rd(0x108f00e4), rd(0x1081103c));
+	seq_printf(m, "cisclk1    mux %08x div %08x gate %08x\n",
+		   rd(0x1a24101c), rd(0x1a241818), rd(CIS_CLK1_GATE));
+	seq_printf(m, "rst=%d mclk=%d\n", rst, mclk);
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(regs);
 
 static void hw_setup(void)
 {
@@ -277,14 +299,19 @@ out:
 	return ret;
 }
 
+static struct dentry *dir;
+
 static int __init s9p_cam_board_init(void)
 {
 	hw_setup();
+	dir = debugfs_create_dir("s9p-cam", NULL);
+	debugfs_create_file("regs", 0400, dir, NULL, &regs_fops);
 	return add_nodes();
 }
 
 static void __exit s9p_cam_board_exit(void)
 {
+	debugfs_remove_recursive(dir);
 	mutex_lock(&pin_lock);
 	mclk_pin(false);
 	reset_pin(false);

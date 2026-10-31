@@ -99,3 +99,28 @@ Next: the vendor's reset of the common DMA and the exact pattern start
 sequence (`csi_hw_s_dma_common_pattern`, `csi_hw_reset`), then a capture with
 the real sensor's colour bars (`0x0600 = 2`) through the link instead of the
 pattern generator.
+
+### Phase 2a, second attempt (2026-10-29, new kernel): ISPPRE restored, capture still not started
+
+The ISPPRE domain had been switched off by the low-power module (PMU
+`0x0010000f`); `echo isppre > /sys/module/s9p_pd_off/parameters/power_on`
+brings it back (now `0x1406404c`). CSIS1 v5.1 answers: `CSIS_VERSION
+0x05010000`, PHY status `0xf1` (idle, correct without a sensor). The test
+capture does not start on the new kernel with `dma_ctrl=2` or `=3` (DMA
+interrupt source stays 0, VC0 `ACT_CTRL 0x0000ff1c`) — the vendor's common-DMA
+start sequence is still missing.
+
+The sensor path is blocked instead: **S5K3H1 no longer answers on the new
+kernel** (NACK on i2c-6/7 for every front device) although phase 1 (2026-10-15)
+worked with identical code. Two attempts (LDOs via `i2cset -f` — 0x59 is
+claimed by the flash-LED driver, `i2ctransfer` gets EBUSY; vendor order +
+reset cycle; then a full 2-second power cycle): still NACK. A new register
+dump in `/sys/kernel/debug/s9p-cam/regs` (`s9p-cam-board.c`) shows everything
+as phase 1 left it: gpg2-5 output-high, gpc1-5 in the MCLK function, the USI08
+config, CIS_CLK1 (mux 0 = OSCCLK, div 0, gate on). LDO readback: all four
+rails enabled (bit 7 set), BUCK1/2 enabled, `BST_CTRL2` 0x90 (revision 1, the
+vendor's check). The bus itself works — a NACK means the transfer completed,
+so pins/clock/USI are fine; the sensor just does not answer. Left open (needs
+a boot decision): reverting to the 15.10 kernel — if the sensor answers there,
+the new kernel changed something; if not, it is board/sensor state.
+

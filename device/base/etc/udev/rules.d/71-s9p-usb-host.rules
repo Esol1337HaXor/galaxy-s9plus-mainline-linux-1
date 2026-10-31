@@ -1,0 +1,9 @@
+# S9+: USB-Host-Role nach Hotplug wiederherstellen
+# PROBLEM: Beim Abziehen des USB-C-Adapters faellt der s9p-usbhost in den
+# device-Modus (role device, xhci-Busse werden deregistert). Beim Wiederanstecken
+# kehrt nur der DP-Teil (Video) zurueck, der USB-Host (und damit der Touchscreen
+# des externen Monitors) nicht.
+# FIX: Beim change-Event des USBC-Controllers (i2c 1-0025, MAX77705) bzw. des
+# s9p-dp-Treibers den Role-Switch zurueck auf host setzen.
+ACTION=="change", SUBSYSTEM=="i2c", KERNEL=="1-0025", RUN+="/bin/sh -c '/bin/echo host > /sys/class/usb_role/10c00000.usb-role-switch/role'"
+ACTION=="change", SUBSYSTEM=="platform", KERNEL=="s9p-dp", RUN+="/bin/sh -c '/bin/echo host > /sys/class/usb_role/10c00000.usb-role-switch/role'"
